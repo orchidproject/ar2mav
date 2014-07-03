@@ -21,7 +21,7 @@ find_package(FFMPEG)
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
 ## See http://ros.org/doc/api/catkin/html/user_guide/setup_dot_py.html
-# catkin_python_setup()
+catkin_python_setup()
 
 ################################################
 ## Declare ROS messages, services and actions ##
@@ -109,7 +109,7 @@ include_directories(
 
 ## Declare a cpp executable
 # add_executable(ar2mav_node src/ar2mav_node.cpp)
-add_executable(ar2 src/ar2.cpp)
+# add_executable(ar2 src/ar2.cpp)
 
 ## Add cmake target dependencies of the executable/library
 ## as an example, message headers may need to be generated before nodes
@@ -119,9 +119,9 @@ add_executable(ar2 src/ar2.cpp)
 # target_link_libraries(ar2mav_node
 #   ${catkin_LIBRARIES}
 # )
-target_link_libraries(ar2
-   ${FFMPEG_LIBRARIES}
-)
+# target_link_libraries(ar2
+#    ${FFMPEG_LIBRARIES}
+# )
 
 #############
 ## Install ##
@@ -139,7 +139,7 @@ target_link_libraries(ar2
 
 ## Mark executables and/or libraries for installation
 # install(TARGETS ar2mav ar2mav_node
-install(TARGETS ar2
+install(TARGETS
    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}

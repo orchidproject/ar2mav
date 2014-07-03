@@ -2,8 +2,7 @@
 import csv, sys, os
 from optparse import OptionParser
 
-sys.path.insert(0, '/home/botev/auv/src/roscopter/mavlink/pymavlink')
-import mavutil
+
 
 parser = OptionParser()
 parser.add_option("-f", "--file", dest="file", help="Csv file with mapping", metavar="FILE", default="map.csv")
@@ -13,6 +12,8 @@ parser.add_option("-i", "--in", dest="inc", help="Incoming Local Host Address", 
 parser.add_option("-s", "--sim", dest="sim", help="Use simulator mode", metavar="SIM", default=False)
 (options, args) = parser.parse_args()
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '../mavlink/pymavlink'))
+import mavutil
 
 # Format of csv file should be uav_id,ip_address,remapped_port
 def load_map(path):
