@@ -26,8 +26,8 @@
       <file leaf-file-name="arproxy.py" pinned="false" current="true" current-in-tab="true">
         <entry file="file://$PROJECT_DIR$/arproxy.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state vertical-scroll-proportion="0.51497006" vertical-offset="380" max-vertical-offset="2385">
-              <caret line="54" column="51" selection-start-line="54" selection-start-column="51" selection-end-line="54" selection-end-column="51" />
+            <state vertical-scroll-proportion="-0.17964073" vertical-offset="720" max-vertical-offset="2385">
+              <caret line="38" column="24" selection-start-line="38" selection-start-column="24" selection-end-line="38" selection-end-column="24" />
               <folding>
                 <element signature="e#18#28#0" expanded="true" />
               </folding>
@@ -429,8 +429,8 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/arproxy.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state vertical-scroll-proportion="0.51497006" vertical-offset="380" max-vertical-offset="2385">
-          <caret line="54" column="51" selection-start-line="54" selection-start-column="51" selection-end-line="54" selection-end-column="51" />
+        <state vertical-scroll-proportion="-0.17964073" vertical-offset="720" max-vertical-offset="2385">
+          <caret line="38" column="24" selection-start-line="38" selection-start-column="24" selection-end-line="38" selection-end-column="24" />
           <folding>
             <element signature="e#18#28#0" expanded="true" />
           </folding>
