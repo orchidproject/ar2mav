@@ -1,21 +1,93 @@
 #!/usr/bin/python
-import csv, sys, os
+import csv
+import sys
+import os
 from optparse import OptionParser
+from struct import pack, unpack
 
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '../mavlink/pymavlink'))
+import mavutil
+from pymavlink.dialects.v10 import ardupilotmega
 
 parser = OptionParser()
 parser.add_option("-f", "--file", dest="file", help="Csv file with mapping", metavar="FILE", default="map.csv")
 parser.add_option("-p", "--port", dest="port", help="Incoming port for ARDrones", metavar="PORT", default="14550")
 parser.add_option("-l", "--local", dest="local", help="Local Host Address", metavar="HOST", default="127.0.0.1")
-parser.add_option("-i", "--in", dest="inc", help="Incoming Local Host Address", metavar="INC", default="127.0.0.1")
-parser.add_option("-s", "--sim", dest="sim", help="Use simulator mode", metavar="SIM", default=False)
+parser.add_option("-v", "--verbose", dest="verbose", help="Verbose", metavar="VERBOSE", default=False)
 (options, args) = parser.parse_args()
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '../mavlink/pymavlink'))
-import mavutil
 
-# Format of csv file should be uav_id,ip_address,remapped_port
+class ARProxyConnection:
+
+
+    def __init__(self, connection, host, verbose=False):
+        self.connection = connection
+        self.host = host
+        self.drone = 0
+        self.manual = -1
+        self.verbose = verbose
+        self.seq = 1
+        self.time = 0
+
+    def process_from_drone(self, msg):
+        if self.verbose:
+            print_msg("From UAV:", msg)
+        if self.manual == -1 and msg.get_type() == "HEARTBEAT":
+            self.manual = msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_MANUAL_INPUT_ENABLED > 0
+            if self.manual:
+                print "UAV in MANUAL"
+            else:
+                print "UAV not in MANUaL"
+        self.connection.port.sendto(msg._msgbuf, self.host)
+        self.drone = self.connection.last_address
+
+
+    def process_from_host(self, msg):
+        if self.verbose:
+            print_msg("From Ground(%d):" % self.manual, msg)
+        if self.manual == -1:
+            print "Have not connected to drone yet"
+            return
+        elif msg.get_type() == "SET_MODE":
+            if msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_MANUAL_INPUT_ENABLED > 0:
+                self.manual = True
+                if self.verbose:
+                    print "Changed to manual"
+            else:
+                self.manual = False
+                if self.verbose:
+                    print "Manual off"
+            self.connection.port.sendto(msg._msgbuf, self.drone)
+        elif self.manual:
+            if msg.get_type() == "COMMAND_LONG":
+                if msg.command == mavutil.mavlink.MAV_CMD_NAV_LAND:
+                    print "AT*REF=3201,290717696\r"
+                elif msg.command == mavutil.mavlink.MAV_CMD_NAV_TAKEOFF:
+                    print "AT*REF=3000,290718208\r"
+                else:
+                    print "Unsupported command in Manual Mode: %d" % msg.command
+            elif msg.get_type() == "RC_CHANNELS_OVERRIDE":
+                print "Sending: "
+                print rc_channel_encode((msg.chan1_raw, msg.chan2_raw, msg.chan3_raw, msg.chan4_raw,
+                                         msg.chan5_raw, msg.chan6_raw, msg.chan7_raw, msg.chan8_raw))
+        else:
+            self.connection.port.sendto(msg._msgbuf, self.drone)
+
+
+def rc_channel_encode(rc_values):
+    transmit_values = unpack('>iiiiiiii', pack('>ffffffff', rc_values[0], rc_values[1], rc_values[2], rc_values[3],
+                                                   rc_values[4], rc_values[5], rc_values[6], rc_values[7], ))
+    return "AT*PCMD_MAG=" + ",".join([str(i) for i in transmit_values]) + "\r"
+
+
+def print_msg(prefix, msg):
+    skip = ["VFR_HUD", "GPS_RAW_INT", "ATTITUDE", "LOCAL_POSITION_NED","RAW_IMU",
+            "SYS_STATUS", "GLOBAL_POSITION_INT", "NAV_CONTROLLER_OUTPUT"]
+    type = msg.get_type()
+    if type not in skip:
+        print "%s %s[%s]" % (prefix, type, ", ".join("%s:%s" % (i, str(msg.__dict__[i])) for i in msg._fieldnames))
+
 def load_map(path):
     f = open(path, mode='r')
     content = csv.reader(f, delimiter=',')
@@ -25,72 +97,32 @@ def load_map(path):
     return ip_map
 
 
-def run_proxy_sim(port, ip_map, host="127.0.0.1", inc="127.0.0.1"):
+def run_proxy(port, csv_map, host="127.0.0.1", verbose=False):
     master = mavutil.mavlink_connection(host + ":" + port)
+    ip_map = {}
     port_map = {}
-    for key in ip_map:
-        print(key + " mapped to " + str(ip_map[key]))
-        port_map[ip_map[key]] = 0
+    for key in csv_map:
+        if verbose:
+            print(key + " mapped to " + str(csv_map[key]))
+        ip_map[key] = ARProxyConnection(master, (host, int(csv_map[key])), verbose)
+        port_map[csv_map[key]] = ip_map[key]
+    # Main loop
     while True:
-        # Check master connection
         msg = master.recv_match()
-        if msg:
-            if msg.get_type() == "BAD_DATA":
-                if mavutil.all_printable(msg.data):
-                    sys.stdout.write(msg.data)
-                    sys.stdout.flush()
-            else:
-                print(str(master.last_address) + " - " + msg.get_type())
-                if master.last_address[1] not in ip_map.values():
-                    master.port.sendto(msg._msgbuf, (host, int(ip_map[master.last_address[0]])))
-                    port_map[ip_map[master.last_address[0]]] = master.last_address
-                else:
-                    if port_map[master.last_address[1]]:
-                        master.port.sendto(msg._msgbuf, port_map[master.last_address[1]])
-
-
-def run_proxy(port, ip_map, host="127.0.0.1", inc="127.0.0.1"):
-    master = mavutil.mavlink_connection(inc + ":" + port)
-    print(host + ":" + port)
-    port_map = {}
-    for key in ip_map:
-        print(key + " mapped to " + str(ip_map[key]))
-        port_map[ip_map[key]] = 0
-    while True:
-        # Check master connection
-        msg = master.recv_match()
-        if msg:
-            if msg.get_type() == "BAD_DATA":
-                if mavutil.all_printable(msg.data):
-                    sys.stdout.write(msg.data)
-                    sys.stdout.flush()
-            elif master.last_address[0] not in ip_map.keys() and master.last_address[0] != host:
-                print("Unregistered AUV with IP: " + master.last_address[0])
-            else:
-                if master.last_address[0] != host:
-                    if msg.get_type() == "HEARTBEAT":
-                        print "From UAV(H) - ", msg.base_mode
-                    if msg.get_type() == "MISSION_CURRENT":
-                        print "From UAV(MC) - ", msg.seq
-                    if msg.get_type() == "MISSION_ITEM":
-                        print "From UAV(MI) - ", " ".join(msg.seq, msg.current, msg.autocontinue, msg.param1, msg.param2, msg.param3, msg.param4)
-                    if msg.get_type() == "MISSION_ACK":
-                        print "From UAV(ACK) - ", msg.type
-                    if msg.get_type() == "COMMAND_ACK":
-                        print "From UAV(CACK) - ", msg.result
-                    if msg.get_type() == "MISSION_REQUEST":
-                        print "From UAV(MR) - ", msg.target_system, " ", msg.target_component, " ", msg.seq
-                    master.port.sendto(msg._msgbuf, (host, ip_map[master.last_address[0]]))
-                    port_map[ip_map[master.last_address[0]]] = master.last_address
-                else:
-                    if port_map[master.last_address[1]]:
-                        print "From Ground - ", msg._type
-                        master.port.sendto(msg._msgbuf, port_map[master.last_address[1]])
+        if not msg:
+            continue
+        if msg.get_type() == "BAD_DATA":
+            if mavutil.all_printable(msg.data):
+                sys.stdout.write(msg.data)
+                sys.stdout.flush()
+        elif master.last_address[0] not in ip_map.keys() and master.last_address[0] != host:
+            print("Unregistered AUV with IP: " + master.last_address[0])
+        elif master.last_address[0] != host:
+            ip_map[master.last_address[0]].process_from_drone(msg)
+        else:
+            port_map[master.last_address[1]].process_from_host(msg)
 
 
 if __name__ == "__main__":
-    ip_map = load_map(options.file)
-    if options.sim:
-        run_proxy_sim(options.port, ip_map, options.local, options.inc)
-    else:
-        run_proxy(options.port, ip_map, options.local, options.inc)
+    csv_map = load_map(options.file)
+    run_proxy(options.port, csv_map, options.local, options.verbose)

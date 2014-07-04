@@ -52,6 +52,11 @@ int main(){
 		printf("%s\n",buff);
 		if (sendto(sock, buff, strlen(buff), 0, (struct sockaddr *)&droneAddr, sizeof(droneAddr)) < 0) { perror("sendto failed"); return 0; }
 	}
+	float c = -0.8;
+	float* a;
+	a = &c;
+	int* b = (int *) a;
+	printf("SSSS:%d\n", *b);
 	//Sleep 10 seconds
 	usleep(1E6*10);
 	for(;i<6000;i+=3){
@@ -60,7 +65,7 @@ int main(){
 		printf("%s\n",buff);
 		if (sendto(sock, buff, strlen(buff), 0, (struct sockaddr *)&droneAddr, sizeof(droneAddr)) < 0) { perror("sendto failed"); return 0; }
 	}
-
+	
 	
     return 0;
 }
