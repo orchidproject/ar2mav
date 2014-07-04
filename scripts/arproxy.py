@@ -2,9 +2,9 @@
 import csv
 import sys
 import os
+import socket
 from optparse import OptionParser
 from struct import pack, unpack
-
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '../mavlink/pymavlink'))
 import mavutil
@@ -21,14 +21,19 @@ parser.add_option("-v", "--verbose", dest="verbose", help="Verbose", metavar="VE
 class ARProxyConnection:
 
 
-    def __init__(self, connection, host, verbose=False):
+    def __init__(self, connection, host, verbose=False, control=1.0, repeat=3):
         self.connection = connection
         self.host = host
         self.drone = 0
         self.manual = -1
         self.verbose = verbose
+        # Manual Control variables
+        self.sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
         self.seq = 1
         self.time = 0
+        self.control = control
+        self.repeat = repeat
+
 
     def process_from_drone(self, msg):
         if self.verbose:
@@ -38,7 +43,7 @@ class ARProxyConnection:
             if self.manual:
                 print "UAV in MANUAL"
             else:
-                print "UAV not in MANUaL"
+                print "UAV not in MANUAL"
         self.connection.port.sendto(msg._msgbuf, self.host)
         self.drone = self.connection.last_address
 
@@ -60,25 +65,45 @@ class ARProxyConnection:
                     print "Manual off"
             self.connection.port.sendto(msg._msgbuf, self.drone)
         elif self.manual:
-            if msg.get_type() == "COMMAND_LONG":
-                if msg.command == mavutil.mavlink.MAV_CMD_NAV_LAND:
-                    print "AT*REF=3201,290717696\r"
-                elif msg.command == mavutil.mavlink.MAV_CMD_NAV_TAKEOFF:
-                    print "AT*REF=3000,290718208\r"
-                else:
-                    print "Unsupported command in Manual Mode: %d" % msg.command
-            elif msg.get_type() == "RC_CHANNELS_OVERRIDE":
-                print "Sending: "
-                print rc_channel_encode((msg.chan1_raw, msg.chan2_raw, msg.chan3_raw, msg.chan4_raw,
-                                         msg.chan5_raw, msg.chan6_raw, msg.chan7_raw, msg.chan8_raw))
+            self.send_manual_command(msg)
         else:
             self.connection.port.sendto(msg._msgbuf, self.drone)
 
 
-def rc_channel_encode(rc_values):
-    transmit_values = unpack('>iiiiiiii', pack('>ffffffff', rc_values[0], rc_values[1], rc_values[2], rc_values[3],
-                                                   rc_values[4], rc_values[5], rc_values[6], rc_values[7], ))
-    return "AT*PCMD_MAG=" + ",".join([str(i) for i in transmit_values]) + "\r"
+    def send_manual_command(self, msg):
+        if msg.get_type() == "COMMAND_LONG":
+            if msg.command == mavutil.mavlink.MAV_CMD_NAV_TAKEOFF:
+                send = ("AT*REF={},290718208\r" * self.repeat).format(
+                    *range(self.seq, self.seq+self.repeat+1))
+                #self.sock.sendto(send, (self.drone[0], 5556))
+                self.seq += self.repeat
+                if self.verbose:
+                    print send
+            elif msg.command == mavutil.mavlink.MAV_CMD_NAV_LAND:
+                send = ("AT*REF={},290717696\r" * self.repeat).format(
+                    *range(self.seq, self.seq+self.repeat+1))
+                #self.sock.sendto(send, (self.drone[0], 5556))
+                self.seq += self.repeat
+                if self.verbose:
+                    print send
+            else:
+                print "Unsupported command in Manual Mode: %d" % msg.command
+        elif msg.get_type() == "RC_CHANNELS_OVERRIDE":
+            # self.sock.sendto("AT*REF=3201,290717696\r", (self.drone[0], 5556))
+            send = (self.rc_channels_encode(msg) * self.repeat).format(
+                *range(self.seq, self.seq+self.repeat+1))
+            #self.sock.sendto(send, (self.drone[0], 5556))
+            self.seq += self.repeat
+            if self.verbose:
+                print send
+
+    def rc_channels_encode(self,msg):
+        transmit_values = unpack('>iiii', pack('>ffff',
+                                               self.control * (msg.chan1_raw - 1500) / 500,
+                                               self.control * (msg.chan2_raw - 1500) / 500,
+                                               self.control * (msg.chan3_raw - 1500) / 500,
+                                               self.control * (msg.chan4_raw - 1500) / 500))
+        return "AT*PCMD_MAG={},1," + ",".join([str(i) for i in transmit_values]) + "\r"
 
 
 def print_msg(prefix, msg):
