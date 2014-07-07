@@ -79,12 +79,10 @@ class ARProxyConnection:
         elif msg.get_type() == "SET_MODE":
             if msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_MANUAL_INPUT_ENABLED:
                 self.manual = True
-                if self.verbose:
-                    print "IN MANUAL MODE"
+                print "MANUAL MODE ON"
             else:
                 self.manual = False
-                if self.verbose:
-                    print "MANUAL MODE OFF"
+                print "MANUAL MODE OFF"
             self.connection.port.sendto(msg._msgbuf, self.drone)
         elif self.manual:
             self.send_manual_command(msg)
@@ -107,7 +105,7 @@ class ARProxyConnection:
                 *range(self.seq, self.seq + self.repeat + 1))
         else:
             return
-        #self.sdk.sendto("\x01\x00\x00\x00", (self.drone, NAVDATA_PORT))
+        self.sdk.sendto("\x01\x00\x00\x00", (self.drone[0], NAVDATA_PORT))
         self.sock.sendto(send, (self.drone[0], COMMAND_PORT))
         self.seq += self.repeat
         if self.verbose:
@@ -166,7 +164,7 @@ def run_proxy(port, csv_map, host="127.0.0.1", verbose=False):
                     sys.stdout.write(msg.data)
                     sys.stdout.flush()
             elif mavlink_connection.last_address[0] not in ip_map.keys() and mavlink_connection.last_address[0] != host:
-                print("Unregistered AUV with IP: " + mavlink_connection.last_address[0])
+                print("Unregistered AUV with IP(MAV): " + mavlink_connection.last_address[0])
             elif mavlink_connection.last_address[0] != host:
                 ip_map[mavlink_connection.last_address[0]].process_from_drone(msg)
             else:
@@ -174,10 +172,10 @@ def run_proxy(port, csv_map, host="127.0.0.1", verbose=False):
         # Receive SDK messages
         try:
             packet, address = sdk_connection.recvfrom(65535)
-            if address not in ip_map.keys():
-                print "Unregistered AUV with IP: ", address
+            if address[0] not in ip_map.keys():
+                print "Unregistered AUV with IP(SDK): ", address[0]
             else:
-                port_map[address].process_from_sdk(decode_navdata(packet))
+                ip_map[address[0]].process_from_sdk(decode_navdata(packet))
         except socket.error as e:
             if e.errno not in [errno.EAGAIN, errno.EWOULDBLOCK, errno.ECONNREFUSED]:
                 raise
@@ -299,5 +297,5 @@ def decode_navdata(packet):
 
 if __name__ == "__main__":
     csv_map = load_map(options.file)
-    # run_proxy(options.port, csv_map, options.local, options.verbose)
-    establish_navdata()
+    run_proxy(options.port, csv_map, options.local, options.verbose)
+    #establish_navdata()
