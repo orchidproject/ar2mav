@@ -30,8 +30,9 @@ EMERGENCY_MASK = 1 << 8
 
 class ARProxyConnection:
 
-    def __init__(self, connection, host, verbose=False, control=1.0, repeat=3):
+    def __init__(self, connection, sdk, host, verbose=False, control=1.0, repeat=3):
         self.connection = connection
+        self.sdk = sdk
         self.host = host
         self.drone = 0
         self.manual = -1
@@ -88,26 +89,23 @@ class ARProxyConnection:
             if msg.command == mavutil.mavlink.MAV_CMD_NAV_TAKEOFF:
                 send = (("AT*REF={},%d\r" % (COMMAND_MASK | TAKEOFF_MASK)) * self.repeat).format(
                     *range(self.seq, self.seq + self.repeat + 1))
-                self.sock.sendto(send, (self.drone[0], COMMAND_PORT))
-                self.seq += self.repeat
-                if self.verbose:
-                    print send
             elif msg.command == mavutil.mavlink.MAV_CMD_NAV_LAND:
                 send = (("AT*REF={},%d\r" % COMMAND_MASK) * self.repeat).format(
                     *range(self.seq, self.seq + self.repeat + 1))
-                self.sock.sendto(send, (self.drone[0], COMMAND_PORT))
-                self.seq += self.repeat
-                if self.verbose:
-                    print send
             else:
                 print "Unsupported command in Manual Mode: %d" % msg.command
+                return
         elif msg.get_type() == "RC_CHANNELS_OVERRIDE":
             send = (self.rc_channels_encode(msg) * self.repeat).format(
                 *range(self.seq, self.seq + self.repeat + 1))
-            self.sock.sendto(send, (self.drone[0], COMMAND_PORT))
-            self.seq += self.repeat
-            if self.verbose:
-                print send
+        else:
+            return
+        #self.sdk.sendto("\x01\x00\x00\x00", (self.drone, NAVDATA_PORT))
+        self.sock.sendto(send, (self.drone[0], COMMAND_PORT))
+        self.seq += self.repeat
+        if self.verbose:
+            print send
+
 
     def rc_channels_encode(self, msg):
         transmit_values = struct.unpack('>iiiiii', struct.pack('>ffffff',
@@ -148,7 +146,8 @@ def run_proxy(port, csv_map, host="127.0.0.1", verbose=False):
     for key in csv_map:
         if verbose:
             print(key + " mapped to " + str(csv_map[key]))
-        ip_map[key] = ARProxyConnection(mavlink_connection, (host, int(csv_map[key])), verbose)
+        ip_map[key] = ARProxyConnection(mavlink_connection, sdk_connection,
+                                        (host, int(csv_map[key])), verbose)
         port_map[csv_map[key]] = ip_map[key]
     # Main loop
     while True:
