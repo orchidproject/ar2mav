@@ -27,6 +27,8 @@ COMMAND_MASK = 0b00010001010101 << 18
 TAKEOFF_MASK = 1 << 9
 EMERGENCY_MASK = 1 << 8
 
+NAVDATA_MESSAGE = "AT*CONFIG=%d,\"general:navdata_demo\",\"TRUE\"\r"
+
 
 class ARProxyConnection:
 
@@ -61,7 +63,12 @@ class ARProxyConnection:
         self.drone = self.connection.last_address
 
     def process_from_sdk(self, data):
-        print "SDL MESSAGE", data
+        if not data["drone_state"]["command_mask"]:
+            print "Proper stream not on, sending AT_REF"
+            self.sdk.sendto(NAVDATA_MESSAGE % self.seq, (self.drone[0], COMMAND_PORT))
+            self.seq += 1
+        else:
+            print "SDK MESSAGE", data
 
     def process_from_host(self, msg):
         if self.verbose:
