@@ -204,8 +204,8 @@ def decode_navdata(packet):
         elif NAVDATA_OPTIONS_CODE[option_id] == "DEMO":
             temp_dict = dict()
             temp = struct.unpack_from("HHIfffifffI", packet, offset)
-            temp_dict["FLY_STATE"] = FLY_STATES[temp[0]]
-            temp_dict["CONTROL_STATE"] = CONTROL_STATES[temp[1]]
+            temp_dict["FLY_STATE"] = temp[0]
+            temp_dict["CONTROL_STATE"] = temp[1]
             temp_dict["BATTERY"] = temp[2]
             temp_dict["THETA"] = temp[3]
             temp_dict["PHI"] = temp[4]
