@@ -17,31 +17,31 @@ parser = OptionParser()
 parser.add_option("-f", "--file", dest="file", help="Csv file with mapping", metavar="FILE", default="map.csv")
 parser.add_option("-p", "--port", dest="port", help="Incoming port for ARDrones", metavar="PORT", default="14550")
 parser.add_option("-l", "--local", dest="local", help="Local Host Address", metavar="HOST", default="127.0.0.1")
-parser.add_option("-v", "--verbose", dest="verbose", help="Verbose", metavar="VERBOSE", default=False)
+parser.add_option("-v", "--verbose", action="store_true", dest="verbose", help="Verbose", metavar="VERBOSE",
+                  default=False)
+parser.add_option("-t", "--test", action="store_true", dest="test", help="Test SDK", metavar="TEST", default=False)
 (options, args) = parser.parse_args()
 
-NAVDATA_MESSAGE = "AT*CONFIG=%d,\"general:navdata_demo\",\"TRUE\"\r"
-NAVDATA_OPTIONS = 1 << NAVDATA_OPTIONS_STR["DEMO"] | 1 << NAVDATA_OPTIONS_STR["VISION_DETECT"] | \
-    1 << NAVDATA_OPTIONS_STR["GAMES"] | 1 << NAVDATA_OPTIONS_STR["MAGNETO"] | \
-    1 << NAVDATA_OPTIONS_STR["HDVIDEO_STREAM"] | 1 << NAVDATA_OPTIONS_STR["WIFI"] | \
-    1 << NAVDATA_OPTIONS_STR["GPS"]
+NAVDATA_OPTIONS = 1 << NAVDATA_OPTIONS_STR["DEMO"] | 1 << NAVDATA_OPTIONS_STR["GPS"] | \
+                  1 << NAVDATA_OPTIONS_STR["REFERENCES"] | 1 << NAVDATA_OPTIONS_STR["TIME"]
+NAVDATA_MESSAGE = "AT*CONFIG={},\"general:navdata_demo\",\"TRUE\"\r"
+NAVDATA_OPTIONS_MESSAGE = "AT*CONFIG={},\"general:navdata_options\",\"%d\"\r" % NAVDATA_OPTIONS
+
 
 # Messages
 # HEARTBEAT - sanitised X
-# ATTITUDE - sanitised
+# ATTITUDE - sanitised X
 # CONTROLLER_OUTPUT - not use by AR Drone 2.0
 # CURRENT_MISSION -  sanitised X
-# FILTERED_POSITION = GLOBAL_POSITION_INT ?
-# GPS = GPS_RAW_INT ?
+# FILTERED_POSITION = GLOBAL_POSITION_INT - sanitised X
+# GPS = GPS_RAW_INT - probably not relevant
 # MISSION_ITEM - not used by AR Drone 2.0 during manual
 # RAW_IMU - not used by AR Drone 2.0
 # RC = RC_CHANNELS_RAW - not used by AR Drone 2.0
-# STATE - sanitised
-# STATUS - sanitised
+# SYS_STATUS - sanitised X
 # VFR_HUD - not used by AR Drone 2.0
 
 class ARProxyConnection:
-
     def __init__(self, connection, sdk, host, verbose=False, control=1.0, repeat=3):
         self.connection = connection
         self.sdk = sdk
@@ -55,12 +55,14 @@ class ARProxyConnection:
         self.cmd_seq = 1
         self.control = control
         self.repeat = repeat
+        self.time = 0
+        self.interval = 0.5
         # MAVLink meta data variables
         self.base_mode = None
         self.custom_mode = None
         self.status = None
         self.mission_seq = 0
-        self.time = 0
+
 
     def process_from_drone(self, msg):
         if self.verbose:
@@ -70,9 +72,9 @@ class ARProxyConnection:
         # if self.manual == -1 and msg.get_type() == "HEARTBEAT":
         # self.manual = msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_MANUAL_INPUT_ENABLED > 0
         # if self.manual:
-        #         print "UAV in MANUAL"
-        #     else:
-        #         print "UAV not in MANUAL"
+        # print "UAV in MANUAL"
+        # else:
+        # print "UAV not in MANUAL"
         self.manual = 0
         if msg.get_type() == "HEARTBEAT":
             self.base_mode = msg.base_mode
@@ -84,25 +86,39 @@ class ARProxyConnection:
         self.drone = self.connection.last_address
 
     def process_from_sdk(self, data):
-        if not data["drone_state"]["command_mask"]:
+        if not data["ARDRONE_STATE"]["COMMAND_MASK"] or not data["ARDRONE_STATE"]["NAVDATA_DEMO_MASK"]:
             print "Proper stream not on, sending AT_REF"
-            self.sdk.sendto(NAVDATA_MESSAGE % self.cmd_seq, (self.drone[0], PORTS["AT"]))
-            self.cmd_seq += 1
-        elif time.clock() - self.time > 1:
+            send = (NAVDATA_MESSAGE * self.repeat).format(
+                *range(self.cmd_seq, self.cmd_seq + self.repeat + 1))
+            self.sdk.sendto(send, (self.drone[0], PORTS["AT"]))
+            self.cmd_seq += self.repeat
+            send = (NAVDATA_OPTIONS_MESSAGE * self.repeat).format(
+                *range(self.cmd_seq, self.cmd_seq + self.repeat + 1))
+            self.sdk.sendto(send, (self.drone[0], PORTS["AT"]))
+            self.cmd_seq += self.repeat
+            return
+        elif time.clock() - self.time > self.interval:
             self.connection.port.sendto(mavutil.mavlink.MAVLink_heartbeat_message(
                 mavutil.mavlink.MAV_TYPE_QUADROTOR,
                 mavutil.mavlink.MAV_AUTOPILOT_GENERIC,
-                self.base_mode,
+                self.base_mode | mavutil.mavlink.MAV_MODE_FLAG_MANUAL_INPUT_ENABLED,
                 self.custom_mode,
                 self.status
             ), self.host)
             self.connection.port.sendto(mavutil.mavlink.MAVLink_mission_current_message(
                 self.mission_sequence
             ), self.host)
-            # TODO
-            # SYS_STATUS
-            # ATTITUDE
-            print "SDK MESSAGE", data
+            self.connection.port.sendto(mavutil.mavlink.MAVLink_attitude_message(
+                data["TIME"], data["REFERENCES"]["ROLL"], data["REFERENCES"]["PITCH"],
+                data["REFERENCES"]["YAW"], 0, 0, 0), self.host)
+            self.connection.port.sendto(mavutil.mavlink.MAVLink_sys_status_message(
+                1, 0, 0, 0, 0, 0, data["DEMO"]["BATTERY"], 0, 0, 0, 0, 0, 0
+            ), self.host)
+            self.connection.port.sendto(mavutil.mavlink.MAVLink_global_position_int_message(
+                data["TIME"], data["GPS"]["LATITUDE"], data["GPS"]["LONGITUDE"], data["GPS"]["ELEVATION"],
+                data["DEMO"]["ALTITUDE"], data["DEMO"]["VX"], data["DEMO"]["VY"], data["DEMO"]["VZ"],
+                -1), self.host)
+            print "SDK MESSAGE"
             self.time = time.clock()
 
     def process_from_host(self, msg):
@@ -147,13 +163,14 @@ class ARProxyConnection:
             print send
 
     def rc_channels_encode(self, msg):
-        transmit_values = struct.unpack('>iiiiii', struct.pack('>ffffff',
-                                                               self.control * (msg.chan1_raw - 1500) / 500,
-                                                               self.control * (msg.chan2_raw - 1500) / 500,
-                                                               self.control * (msg.chan3_raw - 1500) / 500,
-                                                               self.control * (msg.chan4_raw - 1500) / 500,
-                                                               self.control * (msg.chan5_raw - 1500) / 500,
-                                                               self.control * (msg.chan6_raw - 1500) / 500, ))
+        transmit_values = struct.unpack('iiiiii',
+                                        struct.pack('ffffff',
+                                                    self.control * (msg.chan1_raw - 1500) / 500,
+                                                    self.control * (msg.chan2_raw - 1500) / 500,
+                                                    self.control * (msg.chan3_raw - 1500) / 500,
+                                                    self.control * (msg.chan4_raw - 1500) / 500,
+                                                    self.control * (msg.chan5_raw - 1500) / 500,
+                                                    self.control * (msg.chan6_raw - 1500) / 500))
         return "AT*PCMD_MAG={},1," + ",".join([str(i) for i in transmit_values]) + "\r"
 
 
@@ -161,8 +178,8 @@ def print_msg(prefix, msg):
     print time.clock()
     skip = ["HEARTBEAT",
             "MISSION_CURRENT", "SYS_STATUS", "ATTITUDE"
-            "GPS_RAW_INT", "GLOBAL_POSITION_INT",
-            "LOCAL_POSITION_NED", "RAW_IMU", "NAV_CONTROLLER_OUTPUT","VFR_HUD"]
+                                             "GPS_RAW_INT", "GLOBAL_POSITION_INT",
+            "LOCAL_POSITION_NED", "RAW_IMU", "NAV_CONTROLLER_OUTPUT", "VFR_HUD"]
     type = msg.get_type()
     if type not in skip:
         print "%s %s[%s]" % (prefix, type, ", ".join("%s:%s" % (i, str(msg.__dict__[i])) for i in msg._fieldnames))
@@ -219,10 +236,10 @@ def run_proxy(port, csv_map, host="127.0.0.1", verbose=False):
                 raise
 
 
-def establish_navdata():
+def establish_navdata(local):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(("192.168.1.3", 5554))
+    sock.bind((local, 5554))
     sock.setblocking(0)
     cmd = "AT*CONFIG=%d,\"general:navdata_demo\",\"%s\"\r"
     cmd1 = "AT*CONFIG=%d,\"general:navdata_options\",\"%d\"\r"
@@ -278,5 +295,7 @@ def establish_navdata():
 
 if __name__ == "__main__":
     csv_map = load_map(options.file)
-    #run_proxy(options.port, csv_map, options.local, options.verbose)
-    establish_navdata()
+    if options.test:
+        establish_navdata(options.local)
+    else:
+        run_proxy(options.port, csv_map, options.local, options.verbose)
