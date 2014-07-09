@@ -21,6 +21,10 @@ parser.add_option("-v", "--verbose", dest="verbose", help="Verbose", metavar="VE
 (options, args) = parser.parse_args()
 
 NAVDATA_MESSAGE = "AT*CONFIG=%d,\"general:navdata_demo\",\"TRUE\"\r"
+NAVDATA_OPTIONS = 1 << NAVDATA_OPTIONS_STR["DEMO"] | 1 << NAVDATA_OPTIONS_STR["VISION_DETECT"] | \
+    1 << NAVDATA_OPTIONS_STR["GAMES"] | 1 << NAVDATA_OPTIONS_STR["MAGNETO"] | \
+    1 << NAVDATA_OPTIONS_STR["HDVIDEO_STREAM"] | 1 << NAVDATA_OPTIONS_STR["WIFI"] | \
+    1 << NAVDATA_OPTIONS_STR["GPS"]
 
 # Messages
 # HEARTBEAT - sanitised X
@@ -221,6 +225,7 @@ def establish_navdata():
     sock.bind(("192.168.1.3", 5554))
     sock.setblocking(0)
     cmd = "AT*CONFIG=%d,\"general:navdata_demo\",\"%s\"\r"
+    cmd1 = "AT*CONFIG=%d,\"general:navdata_options\",\"%d\"\r"
     cmd2 = "AT*CTRL=%d,0\r"
     stream = False
     nav_data = False
@@ -228,11 +233,13 @@ def establish_navdata():
     seq = 1
     while True:
         if time.clock() - t > 2:
-            print "SSR"
+            print "SSR", NAVDATA_OPTIONS
             t = time.clock()
         if not stream:
             print "Init stream"
             sock.sendto("\x01\x00\x00\x00", ("192.168.1.1", 5554))
+            sock.sendto(cmd1 % (seq, NAVDATA_OPTIONS), ("192.168.1.1", 5556))
+            seq += 1
             time.sleep(0.2)
         try:
             packet, address = sock.recvfrom(65535)
@@ -242,7 +249,7 @@ def establish_navdata():
             print "Stream on"
         stream = True
         data = decode_navdata(packet)
-        if not data["drone_state"]["COMMAND_MASK"]:
+        if not data["ARDRONE_STATE"]["COMMAND_MASK"]:
             print "Send general:navdata_demo"
             sock.sendto(cmd % (seq, "TRUE"), ("192.168.1.1", 5556))
             seq += 1
@@ -251,12 +258,19 @@ def establish_navdata():
             print "Command mask on"
             sock.sendto(cmd2 % seq, ("192.168.1.1", 5556))
             seq += 1
-            nav_data = data["drone_state"]["NAVDATA_DEMO_MASK"]
+            nav_data = data["ARDRONE_STATE"]["NAVDATA_DEMO_MASK"]
             if nav_data:
                 print "Nav data on"
+            else:
+                sock.sendto(cmd % (seq, "TRUE"), ("192.168.1.1", 5556))
+                seq += 1
         if nav_data:
-            print data
-            seq += 1
+            if "GPS" not in data.keys():
+                sock.sendto(cmd1 % (seq, NAVDATA_OPTIONS), ("192.168.1.1", 5556))
+                seq += 1
+            else:
+                print data
+                seq += 1
         if seq > 100:
             print "STOP"
             sock.sendto(cmd % (seq, "FALSE"), ("192.168.1.1", 5556))
