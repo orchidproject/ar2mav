@@ -47,7 +47,7 @@ SDK_NAVDATA_OPTIONS = 12
 # VFR_HUD - not used by AR Drone 2.0
 
 class ARProxyConnection:
-    def __init__(self, connection, sdk, host, verbose=False, repeat=1):
+    def __init__(self, connection, sdk, host, verbose=False, repeat=3):
         self.connection = connection
         self.sdk = sdk
         self.host = host
@@ -61,19 +61,22 @@ class ARProxyConnection:
         self.repeat = repeat
         #SDK variables
         self.time = 0
+        self.sdk_time = 0
         self.interval = 0.3
         self.timeouts = 0
         self.max_timeouts = 10
+        self.tt = 0
         # MAVLink meta data variables
         self.base_mode = None
         self.custom_mode = None
         self.status = None
-        self.mission_seq = 0
+        self.mission_seq = 1
 
     def process_from_drone(self, msg):
         if self.verbose:
             print_msg("From UAV:", msg)
         self.manual = 0
+        self.timeouts = 0
         if msg.get_type() == "HEARTBEAT":
             self.base_mode = msg.base_mode
             self.custom_mode = msg.custom_mode
@@ -83,17 +86,29 @@ class ARProxyConnection:
         self.connection.port.sendto(msg._msgbuf, self.host)
         self.drone = self.connection.last_address
 
-    def process_from_sdk(self, data):
-        if self.timeouts > self.max_timeouts:
+    def process_from_sdk(self, data):        
+        if time.clock() - self.tt > 2:
             print "SDK NAVDATA timed out, falling back to MAVLink"
+            self.manual = False
+            #self.connection.port.sendto(msg._msgbuf, self.drone)
+        elif time.clock() - self.sdk_time < 0.1:
+            return
         elif not data["ARDRONE_STATE"]["COMMAND_MASK"] or not data["ARDRONE_STATE"]["NAVDATA_DEMO_MASK"]:
-            print "Proper stream not on, sending AT_REF"
+            print "Proper stream not on, sending AT_REF t:", self.timeouts
+            #self.invoke_sdk(SDK_NAVDATA_REQUEST)
             self.invoke_sdk(SDK_NAVDATA_COMMAND)
             self.timeouts += 1
+            self.tt = time.clock()
+            #self.sdk_time = time.clock()
+            self.tt = time.clock()
         elif not all(flag in data.keys() for flag in ("TIME", "REFERENCES", "DEMO", "GPS")):
-            print "All required data not enabled, sending AT_REF"
+            print "All required data not enabled, sending AT_CONFIG t:", self.timeouts
+            #self.invoke_sdk(SDK_NAVDATA_REQUEST)
             self.invoke_sdk(SDK_NAVDATA_OPTIONS)
             self.timeouts += 1
+            self.tt = time.clock()
+            #self.sdk_time = time.clock()
+            print data.keys()            
         elif time.clock() - self.time > self.interval:
             print "Fly:", data["DEMO"]["FLY_STATE"], "Control:", data["DEMO"]["CONTROL_STATE"]
             msgs = self.construct_mavlink_messages(data)
@@ -101,6 +116,7 @@ class ARProxyConnection:
                 self.connection.port.sendto(msgs[key].pack(self.connection.mav), self.host)
             self.time = time.clock()
             self.timeouts = 0
+            self.tt = time.clock()
 
     def process_from_host(self, msg):
         if self.verbose:
@@ -111,8 +127,10 @@ class ARProxyConnection:
         elif msg.get_type() == "SET_MODE":
             if msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_MANUAL_INPUT_ENABLED:
                 self.manual = True
+                self.sdk_time = time.clock()
+                self.tt = time.clock()
                 self.invoke_sdk(SDK_NAVDATA_REQUEST)
-                self.invoke_sdk(SDK_NAVDATA_COMMAND)
+#                self.invoke_sdk(SDK_NAVDATA_OPTIONS)
                 print "MANUAL MODE ON"
             else:
                 self.manual = False
@@ -134,7 +152,7 @@ class ARProxyConnection:
                 print "Unsupported command in Manual Mode: %d" % msg.command
         elif msg.get_type() == "RC_CHANNELS_OVERRIDE":
             self.invoke_sdk(SDK_RC,
-                            (msg.chan1_raw, msg.chan2_raw, msg.chan3_raw, msg.chan4_raw, msg.chan5_raw, msg.chan6_raw))
+                            (msg.chan1_raw, msg.chan2_raw, msg.chan3_raw, msg.chan4_raw))
 
     def invoke_sdk(self, command, extra=0):
         msg = "NOPE"
@@ -164,6 +182,7 @@ class ARProxyConnection:
                                                        (extra[2] - 1500) / 500,
                                                        (extra[3] - 1500) / 500))
                 msg = "AT*PCMD={},1," + ",".join([str(i) for i in rc]) + "\r"
+                print msg
         send = (msg * self.repeat).format(*range(self.cmd_seq, self.cmd_seq + self.repeat + 1))
         self.sdk.sendto(send, (self.drone[0], PORTS["AT"]))
         self.cmd_seq += self.repeat
@@ -191,7 +210,7 @@ class ARProxyConnection:
         messages["GPS_RAW_INT"] = mavutil.mavlink.MAVLink_gps_raw_int_message(
             data["TIME"], 0, data["GPS"]["LATITUDE"] * 1E7, data["GPS"]["LONGITUDE"] * 1E7,
             data["GPS"]["ELEVATION"] * 1E3, data["GPS"]["HDOP"] * 100, data["GPS"]["VDOP"] * 100,
-            data["GPS"]["SPEED"] * 100, data["GPS"]["PHI"], data["GPS"]["NB_STABILITIES"])
+            data["GPS"]["SPEED"] * 100, data["GPS"]["PHI_P"], data["GPS"]["NB_STABILITIES"])
         return messages
 
 
@@ -200,7 +219,7 @@ def print_msg(prefix, msg):
             "GPS_RAW_INT", "GLOBAL_POSITION_INT", "LOCAL_POSITION_NED",
             "RAW_IMU", "NAV_CONTROLLER_OUTPUT", "VFR_HUD"]
     if msg.get_type() not in skip:
-        print "%s %s[%s]" % (prefix, type, ", ".join("%s:%s" % (i, str(msg.__dict__[i])) for i in msg._fieldnames))
+        print "%s %s[%s]" % (prefix, msg.get_type(), ", ".join("%s:%s" % (i, str(msg.__dict__[i])) for i in msg._fieldnames))
 
 
 def load_map(path):
@@ -273,9 +292,10 @@ def establish_navdata(local):
         if not stream:
             print "Init stream"
             sock.sendto("\x01\x00\x00\x00", ("192.168.1.1", 5554))
+            print cmd1 % (seq, NAVDATA_OPTIONS)
             sock.sendto(cmd1 % (seq, NAVDATA_OPTIONS), ("192.168.1.1", 5556))
             seq += 1
-            time.sleep(0.2)
+            time.sleep(0.1)
         try:
             packet, address = sock.recvfrom(65535)
         except socket.error:
@@ -298,13 +318,19 @@ def establish_navdata(local):
                 print "Nav data on"
             else:
                 sock.sendto(cmd % (seq, "TRUE"), ("192.168.1.1", 5556))
+                print "No nav data"
+                #time.sleep(0.1)
                 seq += 1
         if nav_data:
             if "GPS" not in data.keys():
                 sock.sendto(cmd1 % (seq, NAVDATA_OPTIONS), ("192.168.1.1", 5556))
+                print "No GPS"
+                #time.sleep(0.1)
                 seq += 1
             else:
-                print data
+                print "data"
+                #sock.sendto(cmd % (seq, "TRUE"), ("192.168.1.1", 5556))
+                sock.sendto(cmd1 % (seq, NAVDATA_OPTIONS), ("192.168.1.1", 5556))
                 seq += 1
         if seq > 100:
             print "STOP"
