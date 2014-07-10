@@ -5,8 +5,8 @@ import os
 import socket
 import errno
 from optparse import OptionParser
-import struct
 import time
+import math
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '../mavlink/pymavlink'))
 import mavutil
@@ -27,6 +27,11 @@ NAVDATA_OPTIONS = 1 << NAVDATA_OPTIONS_STR["DEMO"] | 1 << NAVDATA_OPTIONS_STR["G
 NAVDATA_MESSAGE = "AT*CONFIG={},\"general:navdata_demo\",\"TRUE\"\r"
 NAVDATA_OPTIONS_MESSAGE = "AT*CONFIG={},\"general:navdata_options\",\"%d\"\r" % NAVDATA_OPTIONS
 
+SDK_COMMAND = 0
+SDK_RC = 1
+SDK_NAVDATA_REQUEST = 10
+SDK_NAVDATA_COMMAND = 11
+SDK_NAVDATA_OPTIONS = 12
 
 # Messages
 # HEARTBEAT - sanitised X
@@ -34,7 +39,7 @@ NAVDATA_OPTIONS_MESSAGE = "AT*CONFIG={},\"general:navdata_options\",\"%d\"\r" % 
 # CONTROLLER_OUTPUT - not use by AR Drone 2.0
 # CURRENT_MISSION -  sanitised X
 # FILTERED_POSITION = GLOBAL_POSITION_INT - sanitised X
-# GPS = GPS_RAW_INT - probably not relevant
+# GPS = GPS_RAW_INT - sanitised X
 # MISSION_ITEM - not used by AR Drone 2.0 during manual
 # RAW_IMU - not used by AR Drone 2.0
 # RC = RC_CHANNELS_RAW - not used by AR Drone 2.0
@@ -42,7 +47,7 @@ NAVDATA_OPTIONS_MESSAGE = "AT*CONFIG={},\"general:navdata_options\",\"%d\"\r" % 
 # VFR_HUD - not used by AR Drone 2.0
 
 class ARProxyConnection:
-    def __init__(self, connection, sdk, host, verbose=False, control=1.0, repeat=1):
+    def __init__(self, connection, sdk, host, verbose=False, repeat=1):
         self.connection = connection
         self.sdk = sdk
         self.host = host
@@ -53,30 +58,22 @@ class ARProxyConnection:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.cmd_seq = 1
-        self.control = control
         self.repeat = repeat
+        #SDK variables
         self.time = 0
-        self.interval = 0.5
+        self.interval = 0.3
+        self.timeouts = 0
+        self.max_timeouts = 10
         # MAVLink meta data variables
         self.base_mode = None
         self.custom_mode = None
         self.status = None
         self.mission_seq = 0
 
-
     def process_from_drone(self, msg):
         if self.verbose:
             print_msg("From UAV:", msg)
-        # Since AUTO_MODE does not get set on the Ar Drone 2.0 this is not feasible
-        # a.k.a you can not switch the base_mode MAV_MODE_FLAG_MANUAL_INPUT_ENABLED off
-        # if self.manual == -1 and msg.get_type() == "HEARTBEAT":
-        # self.manual = msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_MANUAL_INPUT_ENABLED > 0
-        # if self.manual:
-        # print "UAV in MANUAL"
-        # else:
-        # print "UAV not in MANUAL"
         self.manual = 0
-        # self.cmd_seq = 1
         if msg.get_type() == "HEARTBEAT":
             self.base_mode = msg.base_mode
             self.custom_mode = msg.custom_mode
@@ -87,45 +84,23 @@ class ARProxyConnection:
         self.drone = self.connection.last_address
 
     def process_from_sdk(self, data):
-        if not data["ARDRONE_STATE"]["COMMAND_MASK"] or not data["ARDRONE_STATE"]["NAVDATA_DEMO_MASK"]:
+        if self.timeouts > self.max_timeouts:
+            print "SDK NAVDATA timed out, falling back to MAVLink"
+        elif not data["ARDRONE_STATE"]["COMMAND_MASK"] or not data["ARDRONE_STATE"]["NAVDATA_DEMO_MASK"]:
             print "Proper stream not on, sending AT_REF"
-            send = (NAVDATA_MESSAGE * self.repeat).format(
-                *range(self.cmd_seq, self.cmd_seq + self.repeat + 1))
-            self.sdk.sendto(send, (self.drone[0], PORTS["AT"]))
-            self.cmd_seq += self.repeat
-            send = (NAVDATA_OPTIONS_MESSAGE * self.repeat).format(
-                *range(self.cmd_seq, self.cmd_seq + self.repeat + 1))
-            self.sdk.sendto(send, (self.drone[0], PORTS["AT"]))
-            self.cmd_seq += self.repeat
-            return
+            self.invoke_sdk(SDK_NAVDATA_COMMAND)
+            self.timeouts += 1
+        elif not all(flag in data.keys() for flag in ("TIME", "REFERENCES", "DEMO", "GPS")):
+            print "All required data not enabled, sending AT_REF"
+            self.invoke_sdk(SDK_NAVDATA_OPTIONS)
+            self.timeouts += 1
         elif time.clock() - self.time > self.interval:
-            require = True
-            for flag in ["TIME", "REFERENCES", "DEMO", "GPS"]:
-                require = require and flag in data.keys()
-            if require:
-                hb = mavutil.mavlink.MAVLink_heartbeat_message(
-                    mavutil.mavlink.MAV_TYPE_QUADROTOR,
-                    mavutil.mavlink.MAV_AUTOPILOT_GENERIC,
-                    self.base_mode | mavutil.mavlink.MAV_MODE_FLAG_MANUAL_INPUT_ENABLED,
-                    self.custom_mode, self.status, 3)
-                self.connection.port.sendto(hb.pack(self.connection.mav), self.host)
-                mc = mavutil.mavlink.MAVLink_mission_current_message(self.mission_seq)
-                self.connection.port.sendto(mc.pack(self.connection.mav), self.host)
-                at = mavutil.mavlink.MAVLink_attitude_message(data["TIME"], 
-                    data["REFERENCES"]["ROLL"], data["REFERENCES"]["PITCH"],
-                    data["REFERENCES"]["YAW"], 0, 0, 0)
-                self.connection.port.sendto(at.pack(self.connection.mav), self.host)
-                st = mavutil.mavlink.MAVLink_sys_status_message(
-                    1, 0, 0, 0, 0, 0, data["DEMO"]["BATTERY"], 0, 0, 0, 0, 0, 0)
-                self.connection.port.sendto(st.pack(self.connection.mav), self.host)
-                gps = mavutil.mavlink.MAVLink_global_position_int_message(
-                    data["TIME"], data["GPS"]["LATITUDE"], data["GPS"]["LONGITUDE"], data["GPS"]["ELEVATION"],
-                    data["DEMO"]["ALTITUDE"], data["DEMO"]["VX"], data["DEMO"]["VY"], data["DEMO"]["VZ"],
-                    0)
-                self.connection.port.sendto(gps.pack(self.connection.mav), self.host)
-            print "SDK MESSAGE"
-            print data.keys()
+            print "Fly:", data["DEMO"]["FLY_STATE"], "Control:", data["DEMO"]["CONTROL_STATE"]
+            msgs = self.construct_mavlink_messages(data)
+            for key in msgs.keys():
+                self.connection.port.sendto(msgs[key].pack(self.connection.mav), self.host)
             self.time = time.clock()
+            self.timeouts = 0
 
     def process_from_host(self, msg):
         if self.verbose:
@@ -136,20 +111,14 @@ class ARProxyConnection:
         elif msg.get_type() == "SET_MODE":
             if msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_MANUAL_INPUT_ENABLED:
                 self.manual = True
-                self.sdk.sendto("\x01\x00\x00\x00", (self.drone[0], PORTS["NAVDATA"]))
-                send = (NAVDATA_MESSAGE * self.repeat).format(
-                    *range(self.cmd_seq, self.cmd_seq + self.repeat + 1))
-                self.sdk.sendto(send, (self.drone[0], PORTS["AT"]))
-                self.cmd_seq += self.repeat
-                send = (NAVDATA_OPTIONS_MESSAGE * self.repeat).format(
-                    *range(self.cmd_seq, self.cmd_seq + self.repeat + 1))
-                self.sdk.sendto(send, (self.drone[0], PORTS["AT"]))
-                self.cmd_seq += self.repeat
+                self.invoke_sdk(SDK_NAVDATA_REQUEST)
+                self.invoke_sdk(SDK_NAVDATA_COMMAND)
                 print "MANUAL MODE ON"
             else:
                 self.manual = False
+                self.timeouts = 0
+                self.connection.port.sendto(msg._msgbuf, self.drone)
                 print "MANUAL MODE OFF"
-            self.connection.port.sendto(msg._msgbuf, self.drone)
         elif self.manual:
             self.send_manual_command(msg)
         else:
@@ -158,44 +127,79 @@ class ARProxyConnection:
     def send_manual_command(self, msg):
         if msg.get_type() == "COMMAND_LONG":
             if msg.command == mavutil.mavlink.MAV_CMD_NAV_TAKEOFF:
-                send = (("AT*REF={},%d\r" % COMMAND_TAKEOFF) * self.repeat).format(
-                    *range(self.cmd_seq, self.cmd_seq + self.repeat + 1))
+                self.invoke_sdk(SDK_COMMAND, COMMAND_TAKEOFF)
             elif msg.command == mavutil.mavlink.MAV_CMD_NAV_LAND:
-                send = (("AT*REF={},%d\r" % COMMAND_LAND) * self.repeat).format(
-                    *range(self.cmd_seq, self.cmd_seq + self.repeat + 1))
+                self.invoke_sdk(SDK_COMMAND, COMMAND_LAND)
             else:
                 print "Unsupported command in Manual Mode: %d" % msg.command
-                return
         elif msg.get_type() == "RC_CHANNELS_OVERRIDE":
-            send = (self.rc_channels_encode(msg) * self.repeat).format(
-                *range(self.cmd_seq, self.cmd_seq + self.repeat + 1))
-        else:
+            self.invoke_sdk(SDK_RC,
+                            (msg.chan1_raw, msg.chan2_raw, msg.chan3_raw, msg.chan4_raw, msg.chan5_raw, msg.chan6_raw))
+
+    def invoke_sdk(self, command, extra=0):
+        msg = "NOPE"
+        if command == SDK_NAVDATA_REQUEST:
+            self.sdk.sendto("\x01\x00\x00\x00", (self.drone[0], PORTS["NAVDATA"]))
             return
-        self.sdk.sendto("\x01\x00\x00\x00", (self.drone[0], PORTS["NAVDATA"]))
-        self.sock.sendto(send, (self.drone[0], PORTS["AT"]))
+        elif command == SDK_NAVDATA_COMMAND:
+            msg = "AT*CONFIG={},\"general:navdata_demo\",\"TRUE\"\r"
+        elif command == SDK_NAVDATA_OPTIONS:
+            msg = "AT*CONFIG={},\"general:navdata_options\",\"%d\"\r" % NAVDATA_OPTIONS
+        elif command == SDK_COMMAND:
+            msg = "AT*REF={},%d\r" % extra
+        elif command == SDK_RC:
+            if len(extra) == 6:
+                rc = struct.unpack('iiiiii', struct.pack('ffffff',
+                                                         (extra[0] - 1500) / 500,
+                                                         (extra[1] - 1500) / 500,
+                                                         (extra[2] - 1500) / 500,
+                                                         (extra[3] - 1500) / 500,
+                                                         (extra[4] - 1500) / 500,
+                                                         (extra[5] - 1500) / 500))
+                msg = "AT*PCMD_MAG={},1," + ",".join([str(i) for i in rc]) + "\r"
+            elif len(extra) == 4:
+                rc = struct.unpack('iiii', struct.pack('ffff',
+                                                       (extra[0] - 1500) / 500,
+                                                       (extra[1] - 1500) / 500,
+                                                       (extra[2] - 1500) / 500,
+                                                       (extra[3] - 1500) / 500))
+                msg = "AT*PCMD={},1," + ",".join([str(i) for i in rc]) + "\r"
+        send = (msg * self.repeat).format(*range(self.cmd_seq, self.cmd_seq + self.repeat + 1))
+        self.sdk.sendto(send, (self.drone[0], PORTS["AT"]))
         self.cmd_seq += self.repeat
         if self.verbose:
             print send
 
-    def rc_channels_encode(self, msg):
-        transmit_values = struct.unpack('iiiiii',
-                                        struct.pack('ffffff',
-                                                    self.control * (msg.chan1_raw - 1500) / 500,
-                                                    self.control * (msg.chan2_raw - 1500) / 500,
-                                                    self.control * (msg.chan3_raw - 1500) / 500,
-                                                    self.control * (msg.chan4_raw - 1500) / 500,
-                                                    self.control * (msg.chan5_raw - 1500) / 500,
-                                                    self.control * (msg.chan6_raw - 1500) / 500))
-        return "AT*PCMD_MAG={},1," + ",".join([str(i) for i in transmit_values]) + "\r"
+    def construct_mavlink_messages(self, data):
+        messages = dict()
+        messages["HEARTBEAT"] = mavutil.mavlink.MAVLink_heartbeat_message(
+            mavutil.mavlink.MAV_TYPE_QUADROTOR,
+            mavutil.mavlink.MAV_AUTOPILOT_GENERIC,
+            self.base_mode | mavutil.mavlink.MAV_MODE_FLAG_MANUAL_INPUT_ENABLED,
+            self.custom_mode, self.status, 3)
+        messages["MISSION_CURRENT"] = mavutil.mavlink.MAVLink_mission_current_message(self.mission_seq)
+        messages["ATTITUDE"] = mavutil.mavlink.MAVLink_attitude_message(data["TIME"],
+                                                                        data["REFERENCES"]["ROLL"],
+                                                                        data["REFERENCES"]["PITCH"],
+                                                                        data["REFERENCES"]["YAW"], 0, 0, 0)
+        messages["SYS_STATUS"] = mavutil.mavlink.MAVLink_sys_status_message(
+            1, 0, 0, 0, 0, 0, data["DEMO"]["BATTERY"], 0, 0, 0, 0, 0, 0)
+        messages["GLOBAL_POSITION_INT"] = mavutil.mavlink.MAVLink_global_position_int_message(
+            data["TIME"], data["GPS"]["LATITUDE"], data["GPS"]["LONGITUDE"], data["GPS"]["ELEVATION"],
+            data["DEMO"]["ALTITUDE"], data["DEMO"]["VX"], data["DEMO"]["VY"], data["DEMO"]["VZ"],
+            0)
+        messages["GPS_RAW_INT"] = mavutil.mavlink.MAVLink_gps_raw_int_message(
+            data["TIME"], 0, data["GPS"]["LATITUDE"] * 1E7, data["GPS"]["LONGITUDE"] * 1E7,
+            data["GPS"]["ELEVATION"] * 1E3, data["GPS"]["HDOP"] * 100, data["GPS"]["VDOP"] * 100,
+            data["GPS"]["SPEED"] * 100, data["GPS"]["PHI"], data["GPS"]["NB_STABILITIES"])
+        return messages
 
 
 def print_msg(prefix, msg):
-    # print time.clock()
-    skip = ["HEARTBEAT","SYS_STATUS", "ATTITUDE",
-            "GPS_RAW_INT", "GLOBAL_POSITION_INT","LOCAL_POSITION_NED", 
+    skip = ["HEARTBEAT", "SYS_STATUS", "ATTITUDE",
+            "GPS_RAW_INT", "GLOBAL_POSITION_INT", "LOCAL_POSITION_NED",
             "RAW_IMU", "NAV_CONTROLLER_OUTPUT", "VFR_HUD"]
-    type = msg.get_type()
-    if type not in skip:
+    if msg.get_type() not in skip:
         print "%s %s[%s]" % (prefix, type, ", ".join("%s:%s" % (i, str(msg.__dict__[i])) for i in msg._fieldnames))
 
 
