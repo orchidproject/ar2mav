@@ -47,7 +47,7 @@ SDK_NAVDATA_OPTIONS = 12
 # VFR_HUD - not used by AR Drone 2.0
 
 class ARProxyConnection:
-    def __init__(self, connection, sdk, host, verbose=False, repeat=3):
+    def __init__(self, connection, sdk, host, verbose=False, repeat=1):
         self.connection = connection
         self.sdk = sdk
         self.host = host
@@ -63,28 +63,19 @@ class ARProxyConnection:
         self.request_navdata_time = 0
         self.mav_last = 0
         self.mav_interval = 0.3
+        self.sdk_call = 0
         # MAVLink meta data variables
         self.base_mode = None
         self.custom_mode = None
         self.status = None
         self.mission_seq = 1
 
-    def init_sdk_stream(self):
-        self.invoke_sdk(SDK_NAVDATA_REQUEST)
-        self.invoke_sdk(SDK_NAVDATA_OPTIONS)
-        time.sleep(0.1)
-        while True:
-            try:
-                packet = self.sdk.recv(65535)
-            except socket.error:
-                continue
-
-
 
     def process_from_drone(self, msg):
         if self.verbose:
             print_msg("From UAV:", msg)
-        self.manual = 0
+        if time.clock() - self.request_navdata_time > 1:
+            self.manual = 0
         self.mav_last = time.clock()
         if msg.get_type() == "HEARTBEAT":
             self.base_mode = msg.base_mode
@@ -100,19 +91,22 @@ class ARProxyConnection:
             return
         elif data["ARDRONE_STATE"]["NAVDATA_DEMO_MASK"]:
             if not all(flag in data.keys() for flag in ("TIME", "REFERENCES", "DEMO", "GPS")):
-                print "NOT ALL NAV DATA"
+                print "NOT ALL NAV DATA", data.keys()
+                self.invoke_sdk(SDK_NAVDATA_COMMAND)
                 self.invoke_sdk(SDK_NAVDATA_OPTIONS)
+                self.sdk.sendto("AT*CTRL=%d,0,0\r" % self.cmd_seq, (self.drone[0], PORTS["AT"]))
+                self.cmd_seq += 1
             elif time.clock() - self.mav_last > self.mav_interval:
+                print "GOT NAV DATA"
                 msgs = self.construct_mavlink_messages(data)
                 for key in msgs.keys():
                     self.connection.port.sendto(msgs[key].pack(self.connection.mav), self.host)
                 self.mav_last = time.clock()
-        elif data["ARDRONE_STATE"]["NAVDATA_BOOTSTRAP"] and data["ARDRONE_STATE"]["COMMAND_MASK"]:
-            print "SDK ACK"
-            self.sdk.sendto("AT*CTRL=0\r", (self.drone[0], PORTS["AT"]))
         else:
             print "SDK COMMAND"
             self.invoke_sdk(SDK_NAVDATA_COMMAND)
+            self.sdk.sendto("AT*CTRL=%d,0,0\r" % self.cmd_seq, (self.drone[0], PORTS["AT"]))
+            self.cmd_seq += 1
 
     def process_from_host(self, msg):
         if self.verbose:
@@ -289,36 +283,37 @@ def establish_navdata(local):
             print cmd1 % (seq, NAVDATA_OPTIONS)
             sock.sendto(cmd1 % (seq, NAVDATA_OPTIONS), ("192.168.1.1", 5556))
             seq += 1
-            time.sleep(0.1)
+            time.sleep(0.2)
         try:
             packet, address = sock.recvfrom(65535)
         except socket.error:
             continue
         if not stream:
-            print "Stream on"
+            print "Stream on "
         stream = True
         data = decode_navdata(packet)
+        print "BT:", data["ARDRONE_STATE"]["NAVDATA_BOOTSTRAP"]
         if not data["ARDRONE_STATE"]["COMMAND_MASK"]:
-            print "Send general:navdata_demo"
+            print "Send general:navdata_demo ", data["ARDRONE_STATE"]["NAVDATA_BOOTSTRAP"]
             sock.sendto(cmd % (seq, "TRUE"), ("192.168.1.1", 5556))
             seq += 1
             continue
         elif not nav_data:
-            print "Command mask on"
-            sock.sendto("AT*CTRL=0\r", ("192.168.1.1", 5556))
+            print "Command mask on ", data["ARDRONE_STATE"]["NAVDATA_BOOTSTRAP"]
+            #sock.sendto("AT*CTRL=0\r", ("192.168.1.1", 5556))
             seq += 1
             nav_data = data["ARDRONE_STATE"]["NAVDATA_DEMO_MASK"]
             if nav_data:
-                print "Nav data on"
+                print "Nav data on", data["ARDRONE_STATE"]["NAVDATA_BOOTSTRAP"]
             else:
                 sock.sendto(cmd % (seq, "TRUE"), ("192.168.1.1", 5556))
-                print "No nav data"
+                print "No nav data", data["ARDRONE_STATE"]["NAVDATA_BOOTSTRAP"]
                 #time.sleep(0.1)
                 seq += 1
         if nav_data:
             if "GPS" not in data.keys():
                 sock.sendto(cmd1 % (seq, NAVDATA_OPTIONS), ("192.168.1.1", 5556))
-                print "No GPS"
+                print "No GPS", data["ARDRONE_STATE"]["NAVDATA_BOOTSTRAP"]
                 #time.sleep(0.1)
                 seq += 1
             else:
