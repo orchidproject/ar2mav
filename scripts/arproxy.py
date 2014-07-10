@@ -22,13 +22,12 @@ parser.add_option("-v", "--verbose", action="store_true", dest="verbose", help="
 parser.add_option("-t", "--test", action="store_true", dest="test", help="Test SDK", metavar="TEST", default=False)
 (options, args) = parser.parse_args()
 
-NAVDATA_OPTIONS = 1 << NAVDATA_OPTIONS_STR["DEMO"] | 1 << NAVDATA_OPTIONS_STR["GPS"] | \
-                  1 << NAVDATA_OPTIONS_STR["REFERENCES"] | 1 << NAVDATA_OPTIONS_STR["TIME"]
-NAVDATA_MESSAGE = "AT*CONFIG={},\"general:navdata_demo\",\"TRUE\"\r"
-NAVDATA_OPTIONS_MESSAGE = "AT*CONFIG={},\"general:navdata_options\",\"%d\"\r" % NAVDATA_OPTIONS
-
+# Constants
+NAVDATA_OPTIONS = 1 << NAVDATA_OPTIONS_STR["DEMO"] | 1 << NAVDATA_OPTIONS_STR["GPS"] | 1 << NAVDATA_OPTIONS_STR[
+    "REFERENCES"] | 1 << NAVDATA_OPTIONS_STR["TIME"]
 SDK_COMMAND = 0
 SDK_RC = 1
+SDK_ACK = 2
 SDK_NAVDATA_REQUEST = 10
 SDK_NAVDATA_COMMAND = 11
 SDK_NAVDATA_OPTIONS = 12
@@ -59,17 +58,15 @@ class ARProxyConnection:
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.cmd_seq = 1
         self.repeat = repeat
-        #SDK variables
+        # SDK variables
         self.request_navdata_time = 0
         self.mav_last = 0
-        self.mav_interval = 0.3
-        self.sdk_call = 0
+        self.mav_interval = 0.25
         # MAVLink meta data variables
         self.base_mode = None
         self.custom_mode = None
         self.status = None
         self.mission_seq = 1
-
 
     def process_from_drone(self, msg):
         if self.verbose:
@@ -87,26 +84,27 @@ class ARProxyConnection:
         self.drone = self.connection.last_address
 
     def process_from_sdk(self, data):
-        if time.clock() - self.request_navdata_time < 0.2:
+        if self.manual == -1 or time.clock() - self.request_navdata_time < 0.2:
             return
         elif data["ARDRONE_STATE"]["NAVDATA_DEMO_MASK"]:
             if not all(flag in data.keys() for flag in ("TIME", "REFERENCES", "DEMO", "GPS")):
-                print "NOT ALL NAV DATA", data.keys()
+                if self.verbose:
+                    print "Did not receive requested NAVDATA"
                 self.invoke_sdk(SDK_NAVDATA_COMMAND)
                 self.invoke_sdk(SDK_NAVDATA_OPTIONS)
-                self.sdk.sendto("AT*CTRL=%d,0,0\r" % self.cmd_seq, (self.drone[0], PORTS["AT"]))
-                self.cmd_seq += 1
+                self.invoke_sdk(SDK_ACK)
             elif time.clock() - self.mav_last > self.mav_interval:
-                print "GOT NAV DATA"
+                if self.verbose:
+                    print "Generating MAVLink from SDK"
                 msgs = self.construct_mavlink_messages(data)
                 for key in msgs.keys():
                     self.connection.port.sendto(msgs[key].pack(self.connection.mav), self.host)
                 self.mav_last = time.clock()
         else:
-            print "SDK COMMAND"
+            if self.verbose:
+                print "Requesting to switch on NAVDATA_MASK"
             self.invoke_sdk(SDK_NAVDATA_COMMAND)
-            self.sdk.sendto("AT*CTRL=%d,0,0\r" % self.cmd_seq, (self.drone[0], PORTS["AT"]))
-            self.cmd_seq += 1
+            self.invoke_sdk(SDK_ACK)
 
     def process_from_host(self, msg):
         if self.verbose:
@@ -142,7 +140,7 @@ class ARProxyConnection:
                             (msg.chan1_raw, msg.chan2_raw, msg.chan3_raw, msg.chan4_raw))
 
     def invoke_sdk(self, command, extra=0):
-        msg = "NOPE"
+        msg = ""
         if command == SDK_NAVDATA_REQUEST:
             self.sdk.sendto("\x01\x00\x00\x00", (self.drone[0], PORTS["NAVDATA"]))
             self.request_navdata_time = time.clock()
@@ -170,12 +168,13 @@ class ARProxyConnection:
                                                        (extra[2] - 1500) / 500,
                                                        (extra[3] - 1500) / 500))
                 msg = "AT*PCMD={},1," + ",".join([str(i) for i in rc]) + "\r"
-                #print msg
+        elif command == SDK_ACK:
+            msg = "AT*CTRL={},0,0\r"
         for i in range(self.repeat):
-            self.sdk.sendto(msg.format(self.cmd_seq+i), (self.drone[0], PORTS["AT"]))
+            self.sdk.sendto(msg.format(self.cmd_seq + i), (self.drone[0], PORTS["AT"]))
         self.cmd_seq += self.repeat
         if self.verbose:
-            print msg
+            print "SDK MESSAGE=", msg
 
     def construct_mavlink_messages(self, data):
         messages = dict()
@@ -207,7 +206,8 @@ def print_msg(prefix, msg):
             "GPS_RAW_INT", "GLOBAL_POSITION_INT", "LOCAL_POSITION_NED",
             "RAW_IMU", "NAV_CONTROLLER_OUTPUT", "VFR_HUD"]
     if msg.get_type() not in skip:
-        print "%s %s[%s]" % (prefix, msg.get_type(), ", ".join("%s:%s" % (i, str(msg.__dict__[i])) for i in msg._fieldnames))
+        print "%s %s[%s]" % (
+            prefix, msg.get_type(), ", ".join("%s:%s" % (i, str(msg.__dict__[i])) for i in msg._fieldnames))
 
 
 def load_map(path):
@@ -300,7 +300,7 @@ def establish_navdata(local):
             continue
         elif not nav_data:
             print "Command mask on ", data["ARDRONE_STATE"]["NAVDATA_BOOTSTRAP"]
-            #sock.sendto("AT*CTRL=0\r", ("192.168.1.1", 5556))
+            # sock.sendto("AT*CTRL=0\r", ("192.168.1.1", 5556))
             seq += 1
             nav_data = data["ARDRONE_STATE"]["NAVDATA_DEMO_MASK"]
             if nav_data:
@@ -308,17 +308,17 @@ def establish_navdata(local):
             else:
                 sock.sendto(cmd % (seq, "TRUE"), ("192.168.1.1", 5556))
                 print "No nav data", data["ARDRONE_STATE"]["NAVDATA_BOOTSTRAP"]
-                #time.sleep(0.1)
+                # time.sleep(0.1)
                 seq += 1
         if nav_data:
             if "GPS" not in data.keys():
                 sock.sendto(cmd1 % (seq, NAVDATA_OPTIONS), ("192.168.1.1", 5556))
                 print "No GPS", data["ARDRONE_STATE"]["NAVDATA_BOOTSTRAP"]
-                #time.sleep(0.1)
+                # time.sleep(0.1)
                 seq += 1
             else:
                 print "data"
-                #sock.sendto(cmd % (seq, "TRUE"), ("192.168.1.1", 5556))
+                # sock.sendto(cmd % (seq, "TRUE"), ("192.168.1.1", 5556))
                 sock.sendto(cmd1 % (seq, NAVDATA_OPTIONS), ("192.168.1.1", 5556))
                 seq += 1
         if seq > 100:
