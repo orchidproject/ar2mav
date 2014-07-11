@@ -116,11 +116,9 @@ class ARProxyConnection:
                     self.connection.port.sendto(msgs[key].pack(self.connection.mav), self.host)
                 self.mav_last = time.clock()
         else:
-            if self.verbose > 0:
-                print "%s: NAVDATA DEMO" % self.name
+            print "%s: NAVDATA DEMO GONE WRONG" % self.name
             self.invoke_sdk(SDK_NAVDATA_COMMAND)
-            print data["ARDRONE_STATE"]
-            #self.invoke_sdk(SDK_ACK)
+            self.invoke_sdk(SDK_ACK)
 
     def process_from_host(self, msg):
         if self.verbose > 2:
@@ -225,7 +223,6 @@ class ARProxyConnection:
             struct.unpack("h", struct.pack("h", round(data["DEMO"]["VY"] / 10)))[0],
             struct.unpack("h", struct.pack("h", round(data["DEMO"]["VZ"] / 10)))[0],
             0)
-        #print "DM:", data["GPS"]["THETA_P"], "\nS:", data["GPS"]["THETA_I"], "\nD:", data["GPS"]["THETA_D"], "\nDA:", data["GPS"]["DATA_AVAILABLE"]
         messages["GPS_RAW_INT"] = mavutil.mavlink.MAVLink_gps_raw_int_message(
             struct.unpack("Q", struct.pack("Q", round(data["GPS"]["LAST_FRAME_TIME"] * 1E3)))[0], 0,
             struct.unpack("i", struct.pack("i", round(data["GPS"]["LATITUDE"] * 1E7)))[0],
@@ -236,6 +233,7 @@ class ARProxyConnection:
             struct.unpack("H", struct.pack("H", round(data["GPS"]["SPEED"] * 100)))[0],
             # TODO Not sure if this is Course Over Ground ?
             struct.unpack("H", struct.pack("H", round(data["GPS"]["DEGREE"]*100)))[0],
+            # TODO data["GPS"]["NB_SATELLITES"] is out of the 255 range ?
             struct.unpack("B", struct.pack("B", 0))[0])
         return messages
 

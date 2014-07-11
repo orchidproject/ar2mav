@@ -4,7 +4,7 @@
 
 # see ARDroneLIb/Soft/Common/config.h
 PORTS = {
-    "FTP"   : 5551,
+    "FTP": 5551,
     "AUTH": 5552,
     "VIDEO_RECORDER": 5553,
     "NAVDATA": 5554,
@@ -71,7 +71,7 @@ AT_COMMAND_BITS = {
     "TRIM_YAW": 1 << 22,
     "X": 1 << 24,
     "Y": 1 << 28,
-    }
+}
 
 COMMAND_LAND = AT_COMMAND_BITS["TRIM_THETA"] | AT_COMMAND_BITS["TRIM_PHI"] | AT_COMMAND_BITS["TRIM_YAW"] | \
                AT_COMMAND_BITS["X"] | AT_COMMAND_BITS["Y"]
@@ -197,8 +197,8 @@ def decode_navdata(packet):
         if option_id not in NAVDATA_OPTIONS_CODE.keys():
             pass
         elif NAVDATA_OPTIONS_CODE[option_id] == "CKS":
-            temp = struct.unpack_from("B"*(len(packet)-8), packet)
-            checksum = struct.unpack_from("I", packet, struct.calcsize("B"*(len(packet)-8))+4)
+            temp = struct.unpack_from("B" * (len(packet) - 8), packet)
+            checksum = struct.unpack_from("I", packet, struct.calcsize("B" * (len(packet) - 8)) + 4)
             data["CHECKSUM"] = checksum[0] == sum(temp)
             break
         elif NAVDATA_OPTIONS_CODE[option_id] == "DEMO":
@@ -222,7 +222,7 @@ def decode_navdata(packet):
             data["TIME"] = drone_time_to_milliseconds(temp[0])
         elif NAVDATA_OPTIONS_CODE[option_id] == "RAW_MEASURES":
             temp_dict = dict()
-            temp = struct.unpack_from("H"*3+"h"*5+"I"+"H"*9+"Iih", packet, offset)
+            temp = struct.unpack_from("H" * 3 + "h" * 5 + "I" + "H" * 9 + "Iih", packet, offset)
             temp_dict["RAW_ACCS"] = [temp[0], temp[1], temp[2]]
             temp_dict["RAW_GYROS"] = [temp[3], temp[4], temp[5]]
             temp_dict["RAW_GYROS110"] = [temp[6], temp[7]]
@@ -236,7 +236,7 @@ def decode_navdata(packet):
             data["RAW_MEASURES"] = temp_dict
         elif NAVDATA_OPTIONS_CODE[option_id] == "PHYS_MEASURES":
             temp_dict = dict()
-            temp = struct.unpack_from("fH"+"f"*6+"I"*3, packet, offset)
+            temp = struct.unpack_from("fH" + "f" * 6 + "I" * 3, packet, offset)
             temp_dict["ACCS_TEMP"] = temp[0]
             temp_dict["GYRO_TEMP"] = temp[1]
             temp_dict["PHYS_ACCS"] = [temp[2], temp[3], temp[4]]
@@ -246,14 +246,14 @@ def decode_navdata(packet):
             temp_dict["VREF_IDG"] = temp[10]
             data["PHYS_MEASURES"] = temp_dict
         elif NAVDATA_OPTIONS_CODE[option_id] == "GYROS_OFFSETS":
-            temp = struct.unpack_from("f"*3, packet, offset)
+            temp = struct.unpack_from("f" * 3, packet, offset)
             data["GYROS_OFFSETS"] = [temp[0], temp[1], temp[2]]
         elif NAVDATA_OPTIONS_CODE[option_id] == "EULER_ANGLES":
-            temp = struct.unpack_from("f"*2, packet, offset)
+            temp = struct.unpack_from("f" * 2, packet, offset)
             data["EULER_ANGLES"] = [temp[0], temp[1]]
         elif NAVDATA_OPTIONS_CODE[option_id] == "REFERENCES":
             temp_dict = dict()
-            temp = struct.unpack_from("i"*8+"f"*6+"I"+"f"*5+"i", packet, offset)
+            temp = struct.unpack_from("i" * 8 + "f" * 6 + "I" + "f" * 5 + "i", packet, offset)
             temp_dict["THETA"] = temp[0]
             temp_dict["PHI"] = temp[1]
             temp_dict["THETA_I"] = temp[2]
@@ -277,11 +277,11 @@ def decode_navdata(packet):
             temp_dict["UI_SEQ"] = temp[20]
             data["REFERENCES"] = temp_dict
         elif NAVDATA_OPTIONS_CODE[option_id] == "TRIMS":
-            temp = struct.unpack_from("f"*3, packet, offset)
+            temp = struct.unpack_from("f" * 3, packet, offset)
             data["TRIMS"] = [temp[0], temp[1], temp[2]]
         elif NAVDATA_OPTIONS_CODE[option_id] == "RC_REFERENCES":
             temp_dict = dict()
-            temp = struct.unpack_from("i"*5, packet, offset)
+            temp = struct.unpack_from("i" * 5, packet, offset)
             temp_dict["PTICH"] = temp[0]
             temp_dict["ROLL"] = temp[1]
             temp_dict["YAW"] = temp[2]
@@ -290,50 +290,51 @@ def decode_navdata(packet):
             data["RC_REFERENCES"] = temp_dict
         elif NAVDATA_OPTIONS_CODE[option_id] == "PWM":
             temp_dict = dict()
-            ## TODO
+            # # TODO
             temp = struct.unpack_from("iiiii", packet, offset)
             data["PWM"] = temp_dict
         elif NAVDATA_OPTIONS_CODE[option_id] == "ALTITUDE":
             temp_dict = dict()
-            ## TODO
+            te
+            # # TODO
             temp = struct.unpack_from("iiiii", packet, offset)
             data["ALTITUDE"] = temp_dict
         elif NAVDATA_OPTIONS_CODE[option_id] == "VISION_RAW":
-            temp = struct.unpack_from("f"*3, packet, offset)
+            temp = struct.unpack_from("f" * 3, packet, offset)
             data["VISION_RAW"] = [temp[0], temp[1], temp[2]]
         elif NAVDATA_OPTIONS_CODE[option_id] == "VISION_OF":
             temp_dict = dict()
-            temp = struct.unpack_from("f"*10, packet, offset)
+            temp = struct.unpack_from("f" * 10, packet, offset)
             temp_dict["DX"] = [temp[0], temp[1], temp[2], temp[3], temp[4]]
             temp_dict["DY"] = [temp[5], temp[6], temp[7], temp[8], temp[9]]
             data["VISION_OF"] = temp_dict
         elif NAVDATA_OPTIONS_CODE[option_id] == "VISION":
             temp_dict = dict()
-            ## TODO
+            # # TODO
             temp = struct.unpack_from("iiiii", packet, offset)
             data["VISION"] = temp_dict
         elif NAVDATA_OPTIONS_CODE[option_id] == "VISION_PERF":
             temp_dict = dict()
-            temp = struct.unpack_from("f"*6, packet, offset)
+            temp = struct.unpack_from("f" * 6, packet, offset)
             temp_dict["TIME_SZO"] = temp[0]
             temp_dict["TIME_CORNERS"] = temp[1]
             temp_dict["TIME_COMPUTE"] = temp[2]
             temp_dict["TIME_TRACKING"] = temp[3]
             temp_dict["TIME_TRANS"] = temp[4]
             temp_dict["TIME_UPDATE"] = temp[5]
-            temp_dict["TIME_CUSTOM"] = struct.unpack_from("f"*20, packet, offset)
+            temp_dict["TIME_CUSTOM"] = struct.unpack_from("f" * 20, packet, offset)
             data["VISION_PERF"] = temp_dict
         elif NAVDATA_OPTIONS_CODE[option_id] == "TRACKERS_SEND":
             temp_dict = dict()
             num = (size - struct.calcsize("HH")) / 12
-            temp = struct.unpack_from("i"*num, packet, offset)
+            temp = struct.unpack_from("i" * num, packet, offset)
             temp_dict["LOCKED"] = list(temp)
-            temp = struct.unpack_from("i"*2*num, packet, offset)
+            temp = struct.unpack_from("i" * 2 * num, packet, offset)
             temp_dict["POINTS"] = list(temp)
             data["TRACKERS_SEND"] = temp_dict
         elif NAVDATA_OPTIONS_CODE[option_id] == "VISION_DETECT":
             temp_dict = dict()
-            ## TODO
+            # # TODO
             temp = struct.unpack_from("i", packet, offset)
             data["VISION_DETECT"] = temp_dict
         elif NAVDATA_OPTIONS_CODE[option_id] == "WATCHDOG":
@@ -343,12 +344,12 @@ def decode_navdata(packet):
             temp_dict = dict()
             temp = struct.unpack_from("I", packet, offset)
             temp_dict["VERSION"] = temp[0]
-            temp = struct.unpack_from("H"*32, packet, offset)
+            temp = struct.unpack_from("H" * 32, packet, offset)
             temp_dict["VERSION"] = list(temp)
             data["ADC_DATA_FRAME"] = temp_dict
         elif NAVDATA_OPTIONS_CODE[option_id] == "VIDEO_STREAM":
             temp_dict = dict()
-            ## TODO
+            # # TODO
             temp = struct.unpack_from("i", packet, offset)
             data["VIDEO_STREAM"] = temp_dict
         elif NAVDATA_OPTIONS_CODE[option_id] == "GAMES":
@@ -359,19 +360,19 @@ def decode_navdata(packet):
             data["PRESSURE_RAW"] = list(temp)
         elif NAVDATA_OPTIONS_CODE[option_id] == "MAGNETO":
             temp = struct.unpack_from("ihii", packet, offset)
-            ## TODO
+            # # TODO
             data["MAGNETO"] = list(temp)
         elif NAVDATA_OPTIONS_CODE[option_id] == "WIND":
             temp = struct.unpack_from("ihii", packet, offset)
-            ## TODO
+            # # TODO
             data["WIND"] = list(temp)
         elif NAVDATA_OPTIONS_CODE[option_id] == "KALMAN_PRESSURE":
             temp = struct.unpack_from("ihii", packet, offset)
-            ## TODO
+            # # TODO
             data["KALMAN_PRESSURE"] = list(temp)
         elif NAVDATA_OPTIONS_CODE[option_id] == "HDVIDEO_STREAM":
             temp_dict = dict()
-            temp = struct.unpack_from("I"*7, packet, offset)
+            temp = struct.unpack_from("I" * 7, packet, offset)
             temp_dict["STATE"] = temp[0]
             temp_dict["STORAGE_PACKETS"] = temp[1]
             temp_dict["STORAGE_SIZE"] = temp[2]
@@ -384,9 +385,11 @@ def decode_navdata(packet):
             temp = struct.unpack_from("I", packet, offset)
             data["WIFI"] = temp[0]
         elif NAVDATA_OPTIONS_CODE[option_id] == "GPS":
-            #see https://github.com/felixge/node-ar-drone/issues/75
+            # see https://github.com/felixge/node-ar-drone/issues/75
             temp_dict = dict()
-            temp = struct.unpack_from("d"*4+"iii"+"d"*4+"I"+"f"*10+"ddfI"+"f"*5+"I"+"B"*24+"iIffI", packet, offset)
+            temp = struct.unpack_from(
+                "d" * 4 + "iii" + "d" * 4 + "I" + "f" * 10 + "ddfI" + "f" * 5 + "I" + "B" * 24 + "iIffI", packet,
+                offset)
             temp_dict["LATITUDE"] = temp[0]
             temp_dict["LONGITUDE"] = temp[1]
             temp_dict["ELEVATION"] = temp[2]
@@ -408,7 +411,7 @@ def decode_navdata(packet):
             temp_dict["THETA_I"] = temp[18]
             temp_dict["PHI_I"] = temp[19]
             temp_dict["THETA_D"] = temp[20]
-            temp_dict["PHI_D"] = temp[21]
+            temp_dict["PHI_D"] = temp[21
             temp_dict["VDOP"] = temp[22]
             temp_dict["PDOP"] = temp[23]
             temp_dict["SPEED"] = temp[24]
@@ -418,7 +421,7 @@ def decode_navdata(packet):
             temp_dict["EHPE"] = temp[28]
             temp_dict["EHVE"] = temp[29]
             temp_dict["C_N0"] = temp[30]
-            temp_dict["NB_STABILITIES"] = temp[31]
+            temp_dict["NB_SATELLITES"] = temp[31]
             temp_dict["SAT_CHANNELS"] = temp[32:56]
             temp_dict["PLUGGED"] = temp[56]
             temp_dict["EPH_METER_STATUS"] = temp[57]
