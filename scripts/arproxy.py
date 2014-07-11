@@ -21,8 +21,11 @@ parser.add_option("-t", "--test", action="store_true", dest="test", help="Test S
 (options, args) = parser.parse_args()
 
 # Constants
-NAVDATA_OPTIONS = 1 << NAVDATA_OPTIONS_STR["DEMO"] | 1 << NAVDATA_OPTIONS_STR["GPS"] | \
-                  1 << NAVDATA_OPTIONS_STR["REFERENCES"] | 1 << NAVDATA_OPTIONS_STR["TIME"]
+REQUIRED_NAVDATA = ("DEMO", "GPS", "TIME")
+NAVDATA_OPTIONS = 0 
+for name in REQUIRED_NAVDATA: 
+    NAVDATA_OPTIONS = NAVDATA_OPTIONS | 1 << NAVDATA_OPTIONS_STR[name]
+
 SDK_COMMAND = 0
 SDK_ACK = 1
 SDK_RC = 2
@@ -97,7 +100,7 @@ class ARProxyConnection:
         if time.clock() - self.request_navdata_time < 0.2:
             return
         elif data["ARDRONE_STATE"]["NAVDATA_DEMO_MASK"]:
-            if not all(flag in data.keys() for flag in ("TIME", "REFERENCES", "DEMO", "GPS")):
+            if not all(flag in data.keys() for flag in REQUIRED_NAVDATA):
                 if self.verbose > 0:
                     print "%s: No NAVDATA" % self.name
                 if self.verbose > 2:
@@ -116,7 +119,8 @@ class ARProxyConnection:
             if self.verbose > 0:
                 print "%s: NAVDATA DEMO" % self.name
             self.invoke_sdk(SDK_NAVDATA_COMMAND)
-            self.invoke_sdk(SDK_ACK)
+            print data["ARDRONE_STATE"]
+            #self.invoke_sdk(SDK_ACK)
 
     def process_from_host(self, msg):
         if self.verbose > 2:
@@ -201,26 +205,27 @@ class ARProxyConnection:
             self.custom_mode, self.status, 3)
         messages["MISSION_CURRENT"] = mavutil.mavlink.MAVLink_mission_current_message(self.mission_seq)
         messages["ATTITUDE"] = mavutil.mavlink.MAVLink_attitude_message(data["TIME"],
-                                                                        data["DEMO"]["PHI"] * pi,
-                                                                        data["DEMO"]["THETA"] * pi,
-                                                                        data["DEMO"]["THETA"] * pi,
+                                                                        data["DEMO"]["PHI"] * pi / 180000,
+                                                                        data["DEMO"]["THETA"] * pi / 180000,
+                                                                        data["DEMO"]["PSI"] * pi / 180000,
                                                                         # TODO No Idea which is ROLL, PITCH and YAW angular speed ?
                                                                         0, 0, 0)
         messages["SYS_STATUS"] = mavutil.mavlink.MAVLink_sys_status_message(
             # TODO How to get the voltage and the current battery in milliamperes ?
-            (1 << 17) - 1, (1 << 17) - 1, (1 << 17) - 1, 0, 0, 0,
+            (1 << 17) - 1, (1 << 17) - 1, (1 << 17) - 1, 0, 0, -1,
             struct.unpack('h', struct.pack('h', data["DEMO"]["BATTERY"]))[0], 0, 0, 0, 0, 0, 0)
         messages["GLOBAL_POSITION_INT"] = mavutil.mavlink.MAVLink_global_position_int_message(
             data["TIME"],
             struct.unpack("i", struct.pack("i", round(data["GPS"]["LATITUDE"] * 1E7)))[0],
             struct.unpack("i", struct.pack("i", round(data["GPS"]["LONGITUDE"] * 1E7)))[0],
             struct.unpack("i", struct.pack("i", round(data["GPS"]["ELEVATION"] * 1E3)))[0],
-            struct.unpack("i", struct.pack("i", round(data["DEMO"]["ALTITUDE"] * 10)))[0],
+            struct.unpack("i", struct.pack("i", round(data["DEMO"]["ALTITUDE"])))[0],
             # TODO Not sure Vx, vY amd Vz are in GPS frame and also which is the heading ?
-            struct.unpack("h", struct.pack("h", round(data["DEMO"]["VX"] * 100)))[0],
-            struct.unpack("h", struct.pack("h", round(data["DEMO"]["VY"] * 100)))[0],
-            struct.unpack("h", struct.pack("h", round(data["DEMO"]["VZ"] * 100)))[0],
+            struct.unpack("h", struct.pack("h", round(data["DEMO"]["VX"] / 10)))[0],
+            struct.unpack("h", struct.pack("h", round(data["DEMO"]["VY"] / 10)))[0],
+            struct.unpack("h", struct.pack("h", round(data["DEMO"]["VZ"] / 10)))[0],
             0)
+        #print "DM:", data["GPS"]["THETA_P"], "\nS:", data["GPS"]["THETA_I"], "\nD:", data["GPS"]["THETA_D"], "\nDA:", data["GPS"]["DATA_AVAILABLE"]
         messages["GPS_RAW_INT"] = mavutil.mavlink.MAVLink_gps_raw_int_message(
             struct.unpack("Q", struct.pack("Q", round(data["GPS"]["LAST_FRAME_TIME"] * 1E3)))[0], 0,
             struct.unpack("i", struct.pack("i", round(data["GPS"]["LATITUDE"] * 1E7)))[0],
@@ -231,7 +236,7 @@ class ARProxyConnection:
             struct.unpack("H", struct.pack("H", round(data["GPS"]["SPEED"] * 100)))[0],
             # TODO Not sure if this is Course Over Ground ?
             struct.unpack("H", struct.pack("H", round(data["GPS"]["DEGREE"]*100)))[0],
-            struct.unpack("B", struct.pack("B", data["GPS"]["NB_STABILITIES"]))[0])
+            struct.unpack("B", struct.pack("B", 0))[0])
         return messages
 
 
@@ -255,7 +260,7 @@ def run_proxy(port, csv_map, host="127.0.0.1", verbose=0):
             print(key + " mapped to " + str(csv_map[key]))
         ip_map[key] = ARProxyConnection(csv_map[key][0], mavlink_connection, sdk_connection,
                                         (host, int(csv_map[key][2])), verbose)
-        port_map[csv_map[key]] = ip_map[key]
+        port_map[int(csv_map[key][2])] = ip_map[key]
     mavlink_connection.wait_heartbeat()
     sdk_connection.bind((host, PORTS["NAVDATA"]))
     sdk_connection.setblocking(0)
