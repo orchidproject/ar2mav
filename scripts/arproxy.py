@@ -100,6 +100,7 @@ class ARProxyConnection:
         if time.clock() - self.request_navdata_time < 0.2:
             return
         elif data["ARDRONE_STATE"]["NAVDATA_DEMO_MASK"]:
+            self.sdk_call = 0
             if not all(flag in data.keys() for flag in REQUIRED_NAVDATA):
                 if self.verbose > 0:
                     print "%s: No NAVDATA" % self.name
@@ -116,8 +117,15 @@ class ARProxyConnection:
                     self.connection.port.sendto(msgs[key].pack(self.connection.mav), self.host)
                 self.mav_last = time.clock()
         else:
+            if self.sdk_call == 0:
+                self.sdk_call = time.clock()
+            if time.clock() - self.sdk_call > 2:
+                print "%s: NAVDATA DEMO GONE WRONG for more than 5 seconds" % self.name
+                print "%s: Switching back to MANUAL" % self.name
+                self.manual = False
             print "%s: NAVDATA DEMO GONE WRONG" % self.name
             self.invoke_sdk(SDK_NAVDATA_COMMAND)
+            self.invoke_sdk(SDK_NAVDATA_OPTIONS)
             self.invoke_sdk(SDK_ACK)
 
     def process_from_host(self, msg):
