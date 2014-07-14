@@ -23,8 +23,8 @@ parser.add_option("-t", "--test", action="store_true", dest="test", help="Test S
 # Constants
 REQUIRED_NAVDATA = ("DEMO", "GPS", "TIME")
 NAVDATA_OPTIONS = 0 
-for name in REQUIRED_NAVDATA: 
-    NAVDATA_OPTIONS = NAVDATA_OPTIONS | 1 << NAVDATA_OPTIONS_STR[name]
+for name in REQUIRED_NAVDATA:
+    NAVDATA_OPTIONS |= 1 << NAVDATA_OPTIONS_STR[name]
 
 SDK_COMMAND = 0
 SDK_ACK = 1
@@ -123,10 +123,11 @@ class ARProxyConnection:
                 print "%s: NAVDATA DEMO GONE WRONG for more than 5 seconds" % self.name
                 print "%s: Switching back to MANUAL" % self.name
                 self.manual = False
-            print "%s: NAVDATA DEMO GONE WRONG" % self.name
-            self.invoke_sdk(SDK_NAVDATA_COMMAND)
-            self.invoke_sdk(SDK_NAVDATA_OPTIONS)
-            self.invoke_sdk(SDK_ACK)
+            else:
+                print "%s: NAVDATA DEMO GONE WRONG" % self.name
+                self.invoke_sdk(SDK_NAVDATA_COMMAND)
+                self.invoke_sdk(SDK_NAVDATA_OPTIONS)
+                self.invoke_sdk(SDK_ACK)
 
     def process_from_host(self, msg):
         if self.verbose > 2:
