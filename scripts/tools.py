@@ -411,7 +411,7 @@ def decode_navdata(packet):
             temp_dict["THETA_I"] = temp[18]
             temp_dict["PHI_I"] = temp[19]
             temp_dict["THETA_D"] = temp[20]
-            temp_dict["PHI_D"] = temp[21
+            temp_dict["PHI_D"] = temp[21]
             temp_dict["VDOP"] = temp[22]
             temp_dict["PDOP"] = temp[23]
             temp_dict["SPEED"] = temp[24]
