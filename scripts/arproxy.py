@@ -21,7 +21,7 @@ parser.add_option("-t", "--test", action="store_true", dest="test", help="Test S
 (options, args) = parser.parse_args()
 
 # Constants
-REQUIRED_NAVDATA = ("DEMO", "GPS", "TIME")
+REQUIRED_NAVDATA = ("DEMO", "GPS", "TIME", "GYROS_OFFSETS")
 NAVDATA_OPTIONS = 0 
 for name in REQUIRED_NAVDATA:
     NAVDATA_OPTIONS |= 1 << NAVDATA_OPTIONS_STR[name]
@@ -90,7 +90,10 @@ class ARProxyConnection:
             if self.verbose == 1 or self.verbose == 2:
                 print "%s HB" % self.name
             self.base_mode = msg.base_mode
-            #self.custom_mode = msg.custom_mode
+            if self.base_mode & mavutil.mavlink.MAV_MODE_FLAG_GUIDED_ENABLED == 0:
+                self.custom_mode = 9
+            else:
+                self.custom_mode = msg.custom_mode
             self.status = msg.system_status
         if msg.get_type() == "MISSION_CURRENT":
             self.mission_seq = msg.seq
@@ -114,25 +117,29 @@ class ARProxyConnection:
                 if self.verbose > 0:
                     print "%s: Make MAVLink" % self.name
                 print data["DEMO"]["CONTROL_STATE"], " ", data["DEMO"]["FLY_STATE"]
-                if data["DEMO"]["CONTROL_STATE"] == 2 and time.clock() - self.change_mode > 2.1 * self.mav_interval:
+                if data["DEMO"]["CONTROL_STATE"] < 3 and self.change_mode > 3:
                     self.custom_mode = 9
                 elif self.manual:
-                    self.custom_mode = 12
+                    self.custom_mode = 99
+                    self.change_mode += 1
                 else:
                     self.custom_mode = 3
+                    self.change_mode += 1
                 msgs = self.construct_mavlink_messages(data)
+                #print data["GPS"]
                 for key in msgs.keys():
                     self.connection.port.sendto(msgs[key].pack(self.connection.mav), self.host)
                 self.mav_last = time.clock()
         else:
             if self.sdk_call == 0:
                 self.sdk_call = time.clock()
-            if time.clock() - self.sdk_call > 2:
+            if time.clock() - self.sdk_call > 5:
                 print "%s: NAVDATA DEMO GONE WRONG for more than 5 seconds" % self.name
                 print "%s: Switching back to MANUAL" % self.name
                 self.manual = False
             else:
-                print "%s: NAVDATA DEMO GONE WRONG" % self.name
+                if self.verbose > 0:
+                    print "%s: NAVDATA DEMO GONE WRONG" % self.name
                 self.invoke_sdk(SDK_NAVDATA_COMMAND)
                 self.invoke_sdk(SDK_NAVDATA_OPTIONS)
                 self.invoke_sdk(SDK_ACK)
@@ -145,12 +152,12 @@ class ARProxyConnection:
                 print "%s: No drone" % self.name
             return
         elif msg.get_type() == "SET_MODE":
-            print msg.base_mode, " ", msg.custom_mode
+            #print msg.base_mode, " ", msg.custom_mode
             if msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED > 0:
-                if msg.custom_mode == 12:
+                if msg.custom_mode == 99:
                     self.manual = True
-                    self.custom_mode = 12
-                    self.change_mode = time.clock()
+                    self.custom_mode = 99
+                    self.change_mode = 0
                     self.invoke_sdk(SDK_NAVDATA_REQUEST)
                     self.invoke_sdk(SDK_NAVDATA_OPTIONS)
                     if self.verbose > 0:
@@ -158,7 +165,7 @@ class ARProxyConnection:
                 elif msg.custom_mode == 3:
                     self.manual = False
                     self.custom_mode = 3
-                    self.change_mode = time.clock()
+                    self.change_mode = 0
                     self.connection.port.sendto(msg._msgbuf, self.drone)
                     if self.verbose > 0:
                         print "%s: MANUAL MODE OFF" % self.name
