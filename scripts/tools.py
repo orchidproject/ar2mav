@@ -295,7 +295,6 @@ def decode_navdata(packet):
             data["PWM"] = temp_dict
         elif NAVDATA_OPTIONS_CODE[option_id] == "ALTITUDE":
             temp_dict = dict()
-            te
             # # TODO
             temp = struct.unpack_from("iiiii", packet, offset)
             data["ALTITUDE"] = temp_dict
