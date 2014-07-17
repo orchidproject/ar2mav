@@ -92,6 +92,14 @@ class ARProxyConnection:
             self.base_mode = msg.base_mode
             if self.base_mode & mavutil.mavlink.MAV_MODE_FLAG_GUIDED_ENABLED == 0:
                 self.custom_mode = 9
+                #print msg._msgbuf
+                msg._msgbuf[6] = 9
+                crc = mavutil.mavlink.x25crc(msg._msgbuf[1:15])
+                crc.accumulate(chr(50))
+                crc = struct.unpack('BB',struct.pack('H',crc.crc))
+                msg._msgbuf[15] = crc[0]
+                msg._msgbuf[16] = crc[1]
+                #print msg._msgbuf
             else:
                 self.custom_mode = msg.custom_mode
             self.status = msg.system_status
@@ -172,6 +180,8 @@ class ARProxyConnection:
         elif self.manual:
             self.send_manual_command(msg)
         else:
+            print msg,":",self.drone
+            print msg._msgbuf
             self.connection.port.sendto(msg._msgbuf, self.drone)
 
     def send_manual_command(self, msg):
