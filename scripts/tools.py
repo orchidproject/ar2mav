@@ -12,7 +12,8 @@ PORTS = {
     "AT": 5556,
     "RAW_CAPTURE": 5557,
     "PRINTF": 5558,
-    "CONTROL": 5559
+    "CONTROL": 5559,
+    "MAVLINK": 14551
 }
 
 # see ARDroneLib/Soft/Common/config.h
@@ -246,6 +247,7 @@ def decode_navdata(packet):
             temp_dict["VREF_IDG"] = temp[10]
             data["PHYS_MEASURES"] = temp_dict
         elif NAVDATA_OPTIONS_CODE[option_id] == "GYROS_OFFSETS":
+            #print "PM:",struct.calcsize("HHfff"),":",size
             temp = struct.unpack_from("f" * 3, packet, offset)
             data["GYROS_OFFSETS"] = [temp[0], temp[1], temp[2]]
         elif NAVDATA_OPTIONS_CODE[option_id] == "EULER_ANGLES":
@@ -389,9 +391,14 @@ def decode_navdata(packet):
             temp = struct.unpack_from(
                 "d" * 4 + "iii" + "d" * 4 + "I" + "f" * 10 + "ddfI" + "f" * 5 + "I" + "B" * 24 + "iIffI", packet,
                 offset)
+            #print struct.calcsize("HHd" * 4 + "i??" + "d" * 4 + "I" + "f" * 10 + "ddfI" + "f" * 5 + "I" + "B" * 24 + "?IffI"),":",size
             temp_dict["LATITUDE"] = temp[0]
             temp_dict["LONGITUDE"] = temp[1]
             temp_dict["ELEVATION"] = temp[2]
+            # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+            # EVERY THING BESIDE THIS POINT HAS NOT BEEN VERIFIED. KNOW THAT THE PACKET SIZE
+            # DOES NOT MATCH THE PARSED SIZE SO ANY DATA COULD BE CORRUPTED
+            # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
             temp_dict["HDOP"] = temp[3]
             temp_dict["DATA_AVAILABLE"] = temp[4]
             temp_dict["ZERO_VALIDATED"] = temp[5]
