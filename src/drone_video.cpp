@@ -1,30 +1,46 @@
-#include <stdio.h>
-#include <stdint.h>
-#include <string.h>
-#include <stdlib.h>
-#include <sys/socket.h>
-#include <time.h>
-#include <netinet/in.h>
-#include <netdb.h>
 #include <arpa/inet.h>
-#include <unistd.h>
-
-#ifndef INT64_C
-#define INT64_C(c) (c ## LL)
-#define UINT64_C(c) (c ## ULL)
-#endif
-
-//#define DRONE_IP_ADDR "192.168.1.1"
-//#define DRONE_VID_STREAM_PORT 5555
-//#define VIDEO_BUFFER_SIZE 40000
-
-#include <ros/ros.h>
 #include <image_transport/image_transport.h>
 #include <x264_image_transport/x264Packet.h>
 
 /**
  * Receives ArDrone 2.0 video stream and publishes it on x264_image_transport
  */
+
+int establish_socket(const char* drone_ip, const int* drone_port, const double* timeout){
+	//***************************************************************************
+	//  Set up sockets
+	//***************************************************************************
+	int socketNumber;
+	
+	sockaddr_in myAddr;
+	sockaddr_in droneAddr;
+
+	myAddr.sin_family = AF_INET;
+	myAddr.sin_addr.s_addr = INADDR_ANY;
+	myAddr.sin_port = htons(*drone_port);
+
+	droneAddr.sin_family = AF_INET;
+	droneAddr.sin_addr.s_addr = inet_addr(drone_ip);
+	droneAddr.sin_port = htons(*drone_port);
+
+	socketNumber = socket(AF_INET, SOCK_STREAM, 0);
+	while(ros::ok() && bind(socketNumber, (sockaddr*) &myAddr, sizeof(sockaddr_in)) < 0) {
+		printf("Failed to bind socket\n");
+		ros::Duration(*timeout).sleep();
+	}
+	while(ros::ok() && connect(socketNumber, (sockaddr*) &droneAddr, sizeof(sockaddr_in)) != 0) {
+		printf("Did not manage to establish connection\n");
+		ros::Duration(*timeout).sleep();
+	}
+	return socketNumber;
+}
+
+/*
+void closeSocket(int sig){
+	printf("Closing socket...\n");
+	close(socketNumber);
+}
+*/
 
 int main(int argc, char **argv)
 {
@@ -48,36 +64,12 @@ int main(int argc, char **argv)
 	image_transport::ImageTransport it(nh);
 	ros::Publisher pub = nh.advertise<x264_image_transport::x264Packet>(topic_name, 1000);
 
-	ros::Rate r(timeout);
-	//***************************************************************************
-	//  Set up sockets
-	//***************************************************************************
-	int socketNumber;
-	sockaddr_in myAddr;
-	sockaddr_in droneAddr;
-
-	myAddr.sin_family = AF_INET;
-	myAddr.sin_addr.s_addr = INADDR_ANY;
-	myAddr.sin_port = htons(drone_port);
-
-	droneAddr.sin_family = AF_INET;
-	droneAddr.sin_addr.s_addr = inet_addr(drone_ip.c_str());
-	droneAddr.sin_port = htons(drone_port);
-
-	socketNumber = socket(AF_INET, SOCK_STREAM, 0);
-	while(ros::ok() && bind(socketNumber, (sockaddr*) &myAddr, sizeof(sockaddr_in)) < 0) {
-		printf("Failed to bind socket\n");
-		r.sleep();
-	}
-	while(ros::ok() && connect(socketNumber, (sockaddr*) &droneAddr, sizeof(sockaddr_in)) != 0) {
-		printf("Did not manage to establish connection\n");
-		r.sleep();
-	}
+	int socketNumber = establish_socket(drone_ip.c_str(), &drone_port, &timeout);
 
 	//***************************************************************************
 	//   Decode PaVE packet and send the encoded video stream
 	//***************************************************************************
-	int index, read, result;
+	int index, read, result, i;
 	ros::Time lastTime;
 	const uint16_t* header_size;
 	const uint32_t* payloadsize;
@@ -88,17 +80,25 @@ int main(int argc, char **argv)
 	printf("\n\n*********************** START ***********************\n\n");
 	while (ros::ok()) {
 		if(index == 0) {
-			partLength = -1;
 			partLength = recv(socketNumber, part, buffer_size,0);
-			if (partLength < 0) {
-				printf("Did not receive video data\n");
-				r.sleep();
+			if (partLength < 1) {
+				printf("Did not receive video data, trying to recover...\n");
+				close(socketNumber);
+				ros::Duration(timeout).sleep();
+				socketNumber = establish_socket(drone_ip.c_str(), &drone_port, &timeout);
+				index = 0;
 				continue;
 			}
 		}
 		if (strncmp((const char*) (part+index),"PaVE", 4) != 0) {
-			printf("PaVE not synchronized, skipping iteration\n");
-			index = 0;
+			printf("PaVE not synchronized, trying to rebind\n");
+			for(i = 0;i<buffer_size;i++)
+				if(strncmp((const char*) (part+index+i),"PaVE", 4) == 0){
+					index += i;
+					break;
+				}
+			if(i == buffer_size)
+				index = 0;
 			continue;
 		}
 		header_size = (const uint16_t*) (part + index + 6);
@@ -127,8 +127,11 @@ int main(int argc, char **argv)
 		else
 			index = 0;
 	}
-
+	printf("Closing socket...\n");
+	close(socketNumber);
 }
+
+
 
 /*
 typedef struct { //PaVE
