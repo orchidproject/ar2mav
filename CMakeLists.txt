@@ -8,20 +8,16 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   rospy
   std_msgs
+  x264_image_transport
 )
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
 
-## ADDED BY LUKE TEACY
-set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR})
-find_package(FFMPEG)
-
-
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
 ## See http://ros.org/doc/api/catkin/html/user_guide/setup_dot_py.html
-catkin_python_setup()
+# catkin_python_setup()
 
 ################################################
 ## Declare ROS messages, services and actions ##
@@ -86,7 +82,7 @@ catkin_python_setup()
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES ar2mav
-#  CATKIN_DEPENDS roscpp rospy std_msgs
+  CATKIN_DEPENDS roscpp rospy std_msgs x264_image_transport
 #  DEPENDS system_lib
 )
 
@@ -99,7 +95,6 @@ catkin_package(
 # include_directories(include)
 include_directories(
   ${catkin_INCLUDE_DIRS}
-  ${FFMPEG_LIBRARIES}
 )
 
 ## Declare a cpp library
@@ -109,18 +104,17 @@ include_directories(
 
 ## Declare a cpp executable
 # add_executable(ar2mav_node src/ar2mav_node.cpp)
-# add_executable(ar2 src/ar2.cpp)
+add_executable(drone_video src/drone_video.cpp)
 
 ## Add cmake target dependencies of the executable/library
 ## as an example, message headers may need to be generated before nodes
 # add_dependencies(ar2mav_node ar2mav_generate_messages_cpp)
 
 ## Specify libraries to link a library or executable target against
-# target_link_libraries(ar2mav_node
-#   ${catkin_LIBRARIES}
-# )
+target_link_libraries(drone_video
+  ${catkin_LIBRARIES}
+)
 # target_link_libraries(ar2
-#    ${FFMPEG_LIBRARIES}
 # )
 
 #############
@@ -132,18 +126,18 @@ include_directories(
 
 ## Mark executable scripts (Python etc.) for installation
 ## in contrast to setup.py, you can choose the destination
-# install(PROGRAMS
-#   scripts/my_python_script
-#   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-# )
+ install(PROGRAMS
+   scripts/arproxy.py
+   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
 
 ## Mark executables and/or libraries for installation
 # install(TARGETS ar2mav ar2mav_node
-install(TARGETS
-   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-)
+# install(TARGETS
+#    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+#    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+#    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+# )
 
 ## Mark cpp header files for installation
 # install(DIRECTORY include/${PROJECT_NAME}/
