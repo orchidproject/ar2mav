@@ -90,9 +90,10 @@ class ARProxyConnection:
         self.mav_last = time.clock()
         if msg.get_type() == "HEARTBEAT":
             #print self.name, " from ", self.connection.source_system
-            if self.verbose == 1 or self.verbose == 2:
-                print "%s HB" % self.name
+            if self.verbose > 0:
+                print "%s: Heartbeat" % self.name
             self.base_mode = msg.base_mode
+	    # print msg.base_mode
             if self.base_mode & mavutil.mavlink.MAV_MODE_FLAG_GUIDED_ENABLED == 0:
                 self.custom_mode = 9
                 msg.custom_mode = 9
@@ -131,7 +132,7 @@ class ARProxyConnection:
             elif time.clock() - self.mav_last > self.mav_interval:
                 if self.verbose > 0:
                     print "%s: Make MAVLink" % self.name
-                print data["DEMO"]["CONTROL_STATE"], " ", data["DEMO"]["FLY_STATE"]
+                # print data["DEMO"]["CONTROL_STATE"], " ", data["DEMO"]["FLY_STATE"]
                 if data["DEMO"]["CONTROL_STATE"] < 3 and self.change_mode > 3:
                     self.custom_mode = 9
                 elif self.manual:
@@ -171,7 +172,7 @@ class ARProxyConnection:
             #print msg.base_mode, " ", msg.custom_mode
             if msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED > 0:
                 if msg.custom_mode == 99:
-                    self.manual = True
+                    self.manual = 1
                     self.custom_mode = 99
                     self.change_mode = 0
                     self.invoke_sdk(SDK_NAVDATA_REQUEST)
@@ -179,7 +180,7 @@ class ARProxyConnection:
                     if self.verbose > 0:
                         print "%s: MANUAL MODE ON" % self.name
                 elif msg.custom_mode == 3:
-                    self.manual = False
+                    self.manual = 0
                     self.custom_mode = 3
                     self.change_mode = 0
                     self.connection.port.sendto(msg._msgbuf, self.drone)
@@ -329,7 +330,7 @@ def run_proxy(port, csv_map, host="127.0.0.1", verbose=0):
     # Main loop
     while True:
         # Receive MAVLink messages
-        msg = mavlink_connection.recv_match()
+        msg = mavlink_connection.recv_match(blocking=False)
         if msg:
             #print msg
             if msg.get_type() == "BAD_DATA":
