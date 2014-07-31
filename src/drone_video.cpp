@@ -6,7 +6,7 @@
  * Receives ArDrone 2.0 video stream and publishes it on x264_image_transport
  */
 
-int establish_socket(const char* drone_ip, const int* drone_port, const double* timeout){
+int establish_socket(const char* drone_ip, const int* drone_port, const struct timeval* timeout){
 	//***************************************************************************
 	//  Set up sockets
 	//***************************************************************************
@@ -25,22 +25,99 @@ int establish_socket(const char* drone_ip, const int* drone_port, const double* 
 
 	socketNumber = socket(AF_INET, SOCK_STREAM, 0);
 	while(ros::ok() && bind(socketNumber, (sockaddr*) &myAddr, sizeof(sockaddr_in)) < 0) {
-		printf("Failed to bind socket\n");
-		ros::Duration(*timeout).sleep();
+		ROS_INFO("Failed to bind socket");
+		ros::Duration((*timeout).tv_sec).sleep();
 	}
 	while(ros::ok() && connect(socketNumber, (sockaddr*) &droneAddr, sizeof(sockaddr_in)) != 0) {
-		printf("Did not manage to establish connection\n");
-		ros::Duration(*timeout).sleep();
+		ROS_INFO("Did not manage to establish connection");
+		ros::Duration((*timeout).tv_sec).sleep();
 	}
+	setsockopt(socketNumber, SOL_SOCKET, SO_RCVTIMEO, (char *)timeout,sizeof(struct timeval));
 	return socketNumber;
 }
 
-/*
-void closeSocket(int sig){
-	printf("Closing socket...\n");
+int fetch_video(ros::NodeHandle nh,int drone_port, std::string drone_ip, 
+		int buffer_size, struct timeval timeout, std::string topic_name){
+	//***************************************************************************
+	//   Helper variables
+	//***************************************************************************
+	int index, read, result, i;
+	const uint16_t* header_size;
+	const uint32_t* payloadsize;
+	unsigned char part[buffer_size];
+	int partLength;
+	bool check;
+	x264_image_transport::x264Packet message;
+	index = 0;
+	//***************************************************************************
+	//   Initialise connection and publisher
+	//***************************************************************************
+	int socketNumber = establish_socket(drone_ip.c_str(), &drone_port, &timeout);
+	ros::Publisher pub = nh.advertise<x264_image_transport::x264Packet>(topic_name, 1000);
+	//***************************************************************************
+	//   Decode PaVE packet and send the encoded video stream
+	//***************************************************************************
+	ROS_INFO("***** START VIDEO STREAM *****");
+	while (ros::ok()) {
+		if(index == 0) {
+			partLength = recv(socketNumber, part, buffer_size,0);
+			if (partLength < 0) {
+				ROS_INFO("Did not receive video data, trying to recover.");
+				close(socketNumber);
+				ros::Duration(timeout.tv_sec).sleep();
+				socketNumber = establish_socket(drone_ip.c_str(), &drone_port, &timeout);
+				index = 0;
+				continue;
+			}
+		}
+		if (strncmp((const char*) (part+index),"PaVE", 4) != 0) {
+			ROS_INFO("PaVE not synchronized, trying to rebind");
+			for(i = 0;i<buffer_size-index-3;i++)
+				if(strncmp((const char*) (part+index+i),"PaVE", 4) == 0){
+					index += i;
+					break;
+				}
+			if(i == buffer_size-index-3)
+				index = 0;
+			continue;
+		}
+		header_size = (const uint16_t*) (part + index + 6);
+		payloadsize = (const uint32_t*) (part + index + 8);
+		message.img_width = *(const uint16_t*) (part + index + 16);
+		message.img_height = *(const uint16_t*) (part + index + 18);
+		message.header.stamp.fromSec(*(const uint32_t*) (part + index + 24) / 1000.0);
+		// This packet did not contain all the data
+		if(partLength - index -  *header_size < *payloadsize) {
+			read = partLength - index - *header_size;
+			check = false;
+			while (read < *payloadsize) {
+				partLength = recv(socketNumber, part+index+*header_size+read, *payloadsize - read,0);
+				if(partLength < 0){
+					check = true;
+					break;
+				}
+				read += partLength;
+			}
+			if(check){
+				ROS_INFO("Timedout while waiting extra packets.");
+				index = 0;
+				continue;
+			}		
+			partLength = index + *header_size + *payloadsize;
+		}
+
+		message.data.assign(part+index+*header_size, part+index+*header_size+*payloadsize);
+		pub.publish(message);
+		//Received more than one packet in the buffer
+		if(partLength - index - *header_size > *payloadsize)
+			index += *header_size + *payloadsize;
+		else
+			index = 0;
+	}
+	ROS_INFO("Closing socket.");
 	close(socketNumber);
+	return 0;
 }
-*/
 
 int main(int argc, char **argv)
 {
@@ -56,82 +133,17 @@ int main(int argc, char **argv)
 	nh.param<std::string>("drone_ip", drone_ip, "192.168.1.1");
 	int buffer_size;
 	nh.param<int>("buffer_size", buffer_size, 65536);
-	double timeout;
-	nh.param<double>("timeout", timeout, 1.0);
+	struct timeval timeout;
+	timeout.tv_usec = 0;
+	int temp;
+	nh.param<int>("timeout", temp, 1);
+	timeout.tv_sec = temp;
 	std::string topic_name;
 	nh.param<std::string>("topic_name", topic_name, "/image/x264");
-
+	
 	image_transport::ImageTransport it(nh);
-	ros::Publisher pub = nh.advertise<x264_image_transport::x264Packet>(topic_name, 1000);
-
-	int socketNumber = establish_socket(drone_ip.c_str(), &drone_port, &timeout);
-
-	//***************************************************************************
-	//   Decode PaVE packet and send the encoded video stream
-	//***************************************************************************
-	int index, read, result, i;
-	ros::Time lastTime;
-	const uint16_t* header_size;
-	const uint32_t* payloadsize;
-	unsigned char part[buffer_size];
-	int partLength;
-	x264_image_transport::x264Packet message;
-	index = 0;
-	printf("\n\n*********************** START ***********************\n\n");
-	while (ros::ok()) {
-		if(index == 0) {
-			partLength = recv(socketNumber, part, buffer_size,0);
-			if (partLength < 1) {
-				printf("Did not receive video data, trying to recover...\n");
-				close(socketNumber);
-				ros::Duration(timeout).sleep();
-				socketNumber = establish_socket(drone_ip.c_str(), &drone_port, &timeout);
-				index = 0;
-				continue;
-			}
-		}
-		if (strncmp((const char*) (part+index),"PaVE", 4) != 0) {
-			printf("PaVE not synchronized, trying to rebind\n");
-			for(i = 0;i<buffer_size;i++)
-				if(strncmp((const char*) (part+index+i),"PaVE", 4) == 0){
-					index += i;
-					break;
-				}
-			if(i == buffer_size)
-				index = 0;
-			continue;
-		}
-		header_size = (const uint16_t*) (part + index + 6);
-		payloadsize = (const uint32_t*) (part + index + 8);
-		message.img_width = *(const uint16_t*) (part + index + 16);
-		message.img_height = *(const uint16_t*) (part + index + 18);
-		message.header.stamp.fromSec(*(const uint32_t*) (part + index + 24) / 1000.0);
-		// This packet did not contain all the data
-		if(partLength - index -  *header_size < *payloadsize) {
-			read = partLength - index - *header_size;
-			lastTime = ros::Time::now();
-			while (read < *payloadsize && (ros::Time::now().sec - lastTime.sec)< 1) {
-				partLength = recv(socketNumber, part+index+*header_size+read, *payloadsize - read,0);
-				read += partLength;
-				lastTime = ros::Time::now();
-			}
-			partLength = index + *header_size + *payloadsize;
-		}
-
-		message.data.assign(part+index+*header_size, part+index+*header_size+*payloadsize);
-		pub.publish(message);
-
-		//Received more than one packet in the buffer
-		if(partLength - index - *header_size > *payloadsize)
-			index += *header_size + *payloadsize;
-		else
-			index = 0;
-	}
-	printf("Closing socket...\n");
-	close(socketNumber);
+	return fetch_video(nh, drone_port, drone_ip, buffer_size, timeout, topic_name);
 }
-
-
 
 /*
 typedef struct { //PaVE
