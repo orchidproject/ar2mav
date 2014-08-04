@@ -43,7 +43,7 @@ int fetch_video(ros::NodeHandle nh,int drone_port, std::string drone_ip,
 	//***************************************************************************
 	int index, read, result, i;
 	const uint16_t* header_size;
-	const uint32_t* payloadsize;
+	const uint32_t* payload_size;
 	unsigned char part[buffer_size];
 	int partLength;
 	bool check;
@@ -82,16 +82,21 @@ int fetch_video(ros::NodeHandle nh,int drone_port, std::string drone_ip,
 			continue;
 		}
 		header_size = (const uint16_t*) (part + index + 6);
-		payloadsize = (const uint32_t*) (part + index + 8);
+		payload_size = (const uint32_t*) (part + index + 8);
 		message.img_width = *(const uint16_t*) (part + index + 16);
 		message.img_height = *(const uint16_t*) (part + index + 18);
 		message.header.stamp.fromSec(*(const uint32_t*) (part + index + 24) / 1000.0);
+		if(index + *header_size + *payload_size > buffer_size){
+			ROS_INFO("Too big payload, skipping frame.");
+			index = 0;
+			continue;
+		}
 		// This packet did not contain all the data
-		if(partLength - index -  *header_size < *payloadsize) {
+		if(partLength - index -  *header_size < *payload_size) {
 			read = partLength - index - *header_size;
 			check = false;
-			while (read < *payloadsize) {
-				partLength = recv(socketNumber, part+index+*header_size+read, *payloadsize - read,0);
+			while (read < *payload_size) {
+				partLength = recv(socketNumber, part+index+*header_size+read, *payload_size - read,0);
 				if(partLength <= 0){
 					check = true;
 					break;
@@ -103,14 +108,14 @@ int fetch_video(ros::NodeHandle nh,int drone_port, std::string drone_ip,
 				index = 0;
 				continue;
 			}		
-			partLength = index + *header_size + *payloadsize;
+			partLength = index + *header_size + *payload_size;
 		}
 
-		message.data.assign(part+index+*header_size, part+index+*header_size+*payloadsize);
+		message.data.assign(part+index+*header_size, part+index+*header_size+*payload_size);
 		pub.publish(message);
 		//Received more than one packet in the buffer
-		if(partLength - index - *header_size > *payloadsize)
-			index += *header_size + *payloadsize;
+		if(partLength - index - *header_size > *payload_size)
+			index += *header_size + *payload_size;
 		else
 			index = 0;
 	}

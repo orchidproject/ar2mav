@@ -2,7 +2,7 @@
    <node pkg="ar2mav" type="drone_video" name="drone_video" respawn="false" output="screen">
 	<param name="drone_ip" value="192.168.1.1" />
 	<param name="drone_port" value="5555" />
-	<param name="buffer_size" value="40000" />
+	<param name="buffer_size" value="1048576" />
 	<param name="timeout" value="1" />
 	<param name="topic_name" value="/image/x264" />
    </node>
