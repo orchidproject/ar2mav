@@ -61,7 +61,7 @@ int fetch_video(ros::NodeHandle nh,int drone_port, std::string drone_ip,
 	while (ros::ok()) {
 		if(index == 0) {
 			partLength = recv(socketNumber, part, buffer_size,0);
-			if (partLength < 0) {
+			if (partLength <= 0) {
 				ROS_INFO("Did not receive video data, trying to recover.");
 				close(socketNumber);
 				ros::Duration(timeout.tv_sec).sleep();
@@ -92,7 +92,7 @@ int fetch_video(ros::NodeHandle nh,int drone_port, std::string drone_ip,
 			check = false;
 			while (read < *payloadsize) {
 				partLength = recv(socketNumber, part+index+*header_size+read, *payloadsize - read,0);
-				if(partLength < 0){
+				if(partLength <= 0){
 					check = true;
 					break;
 				}
