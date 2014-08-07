@@ -87,7 +87,7 @@ int fetch_video(ros::NodeHandle nh,int drone_port, std::string drone_ip,
 		message.img_height = *(const uint16_t*) (part + index + 18);
 		message.header.stamp.fromSec(*(const uint32_t*) (part + index + 24) / 1000.0);
 		if(index + *header_size + *payload_size > buffer_size){
-			ROS_INFO("Too big payload, skipping frame.");
+			ROS_INFO("Too big payload, skipping frame.(ADVICE: Increase buffer_size)");
 			index = 0;
 			continue;
 		}
