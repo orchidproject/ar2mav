@@ -22,13 +22,15 @@ parser.add_option("-t", "--test", action="store_true", dest="test", help="Test S
 
 # Constants
 REQUIRED_NAVDATA = ("DEMO", "GPS", "TIME", "GYROS_OFFSETS")
-NAVDATA_OPTIONS = 0 
+NAVDATA_OPTIONS = 0
 for name in REQUIRED_NAVDATA:
     NAVDATA_OPTIONS |= 1 << NAVDATA_OPTIONS_STR[name]
 
 SDK_COMMAND = 0
 SDK_ACK = 1
 SDK_RC = 2
+SDK_CAMERA = 3
+SDK_EMERGENCY = 4
 SDK_NAVDATA_REQUEST = 10
 SDK_NAVDATA_COMMAND = 11
 SDK_NAVDATA_OPTIONS = 12
@@ -56,7 +58,7 @@ class ARProxyConnection:
     # 1 - Only information about manual control is printed
     # 2 - Manual Control Information + some extra
     # 3 - All incoming data is printed - detailed messages
-    def __init__(self, name, ip,connection, sdk, host, verbose=0, repeat=1):
+    def __init__(self, name, ip, connection, sdk, host, verbose=0, repeat=1):
         self.name = name
         self.ip = ip
         self.connection = connection
@@ -81,6 +83,7 @@ class ARProxyConnection:
         self.custom_mode = None
         self.status = None
         self.mission_seq = 1
+        self.camera_value = 1.0
 
     def process_from_drone(self, msg):
         if self.verbose > 2:
@@ -89,11 +92,11 @@ class ARProxyConnection:
             self.manual = 0
         self.mav_last = time.clock()
         if msg.get_type() == "HEARTBEAT":
-            #print self.name, " from ", self.connection.source_system
+            # print self.name, " from ", self.connection.source_system
             if self.verbose > 0:
                 print "%s: Heartbeat" % self.name
             self.base_mode = msg.base_mode
-	    # print msg.base_mode
+            # print msg.base_mode
             if self.base_mode & mavutil.mavlink.MAV_MODE_FLAG_GUIDED_ENABLED == 0:
                 self.custom_mode = 9
                 msg.custom_mode = 9
@@ -101,7 +104,7 @@ class ARProxyConnection:
                 msg._msgbuf[6] = 9
                 crc = mavutil.mavlink.x25crc(msg._msgbuf[1:15])
                 crc.accumulate(chr(50))
-                crc = struct.unpack('BB',struct.pack('H',crc.crc))
+                crc = struct.unpack('BB', struct.pack('H', crc.crc))
                 msg._msgbuf[15] = crc[0]
                 msg._msgbuf[16] = crc[1]
                 #print msg._msgbuf
@@ -111,10 +114,10 @@ class ARProxyConnection:
         if msg.get_type() == "MISSION_CURRENT":
             self.mission_seq = msg.seq
         self.connection.mav.srcSystem = int(self.ip.split(".")[3])
-        #print self.connection.source_system
+        # print self.connection.source_system
         self.connection.port.sendto(msg.pack(self.connection.mav), self.host)
         #self.connection.port.sendto(msg._msgbuf, self.host)
-        self.drone = (self.ip ,self.connection.last_address[1])
+        self.drone = (self.ip, self.connection.last_address[1])
 
     def process_from_sdk(self, data):
         if time.clock() - self.request_navdata_time < 0.2:
@@ -142,7 +145,7 @@ class ARProxyConnection:
                     self.custom_mode = 3
                     self.change_mode += 1
                 msgs = self.construct_mavlink_messages(data)
-                #print data["GPS"]
+                # print data["GPS"]
                 for key in msgs.keys():
                     self.connection.mav.srcSystem = int(self.ip.split(".")[3])
                     self.connection.port.sendto(msgs[key].pack(self.connection.mav), self.host)
@@ -169,7 +172,7 @@ class ARProxyConnection:
                 print "%s: No drone" % self.name
             return
         elif msg.get_type() == "SET_MODE":
-            #print msg.base_mode, " ", msg.custom_mode
+            # print msg.base_mode, " ", msg.custom_mode
             if msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED > 0:
                 if msg.custom_mode == 99:
                     self.manual = 1
@@ -186,10 +189,12 @@ class ARProxyConnection:
                     self.connection.port.sendto(msg._msgbuf, self.drone)
                     if self.verbose > 0:
                         print "%s: MANUAL MODE OFF" % self.name
+        elif msg.get_type() == "COMMAND_LONG" and msg.command == 100:
+            self.invoke_sdk(SDK_EMERGENCY)
         elif self.manual:
             self.send_manual_command(msg)
         else:
-            #print msg,":",self.drone
+            # print msg,":",self.drone
             #print msg._msgbuf
             #print self.name, ":" , self.drone
             self.connection.port.sendto(msg._msgbuf, self.drone)
@@ -200,9 +205,18 @@ class ARProxyConnection:
                 self.invoke_sdk(SDK_COMMAND, COMMAND_TAKEOFF)
             elif msg.command == mavutil.mavlink.MAV_CMD_NAV_LAND:
                 self.invoke_sdk(SDK_COMMAND, COMMAND_LAND)
-            else:
-                if self.verbose > 0:
-                    print "%s Unsupported manual command: %d" % (self.name, msg.command)
+            elif self.verbose > 0:
+                print "%s Unsupported manual command: %d" % (self.name, msg.command)
+        elif msg.get_type() == "PARAM_SET" and "CAM-RECORD_HORI" in msg.param_id:
+            #print "SS ", msg.param_id, ":", msg.param_id == "CAM-RECORD_HORI"
+            self.invoke_sdk(SDK_CAMERA, extra=msg.param_value)
+            self.camera_value = msg.param_value
+        elif msg.get_type() == "PARAM_REQUEST_READ":
+            #print "ZZZZZZZZZZZZZZZZZZZZZZ"
+            message = mavutil.mavlink.MAVLink_param_value_message(msg.param_id, self.camera_value,
+                                                                  mavutil.mavlink.MAVLINK_TYPE_FLOAT,
+                                                                  14, 12)
+            self.connection.port.sendto(message.pack(self.connection.mav), self.host)
         elif msg.get_type() == "RC_CHANNELS_OVERRIDE":
             self.invoke_sdk(SDK_RC,
                             (msg.chan1_raw, msg.chan2_raw, msg.chan3_raw, msg.chan4_raw))
@@ -238,6 +252,15 @@ class ARProxyConnection:
                 msg = "AT*PCMD={},1," + ",".join([str(i) for i in rc]) + "\r"
         elif command == SDK_ACK:
             msg = "AT*CTRL={},0,0\r"
+        elif command == SDK_CAMERA:
+            msg = "AT*CONFIG={},\"video:video_channel\",\"%d\"\r" % (extra > 0)
+        elif command == SDK_EMERGENCY:
+            msg = "AT*REF={},%d\r" % COMMAND_EMERGENCY
+            for i in range(self.repeat):
+                self.sdk.sendto(msg.format(self.cmd_seq + i), (self.drone[0], PORTS["AT"]))
+            self.cmd_seq += self.repeat
+            time.sleep(self.mav_interval)
+            msg = "AT*REF={},%d\r" % COMMAND_LAND
         for i in range(self.repeat):
             self.sdk.sendto(msg.format(self.cmd_seq + i), (self.drone[0], PORTS["AT"]))
             if self.verbose > 2:
@@ -282,7 +305,7 @@ class ARProxyConnection:
             struct.unpack("H", struct.pack("H", round(data["GPS"]["VDOP"] * 100)))[0],
             struct.unpack("H", struct.pack("H", round(data["GPS"]["SPEED"] * 100)))[0],
             # TODO Not sure if this is Course Over Ground ?
-            struct.unpack("H", struct.pack("H", round(data["GPS"]["DEGREE"]*100)))[0],
+            struct.unpack("H", struct.pack("H", round(data["GPS"]["DEGREE"] * 100)))[0],
             # TODO data["GPS"]["NB_SATELLITES"] is out of the 255 range ?
             struct.unpack("B", struct.pack("B", 0))[0])
         return messages
@@ -303,11 +326,11 @@ def run_proxy(port, csv_map, host="127.0.0.1", verbose=0):
     # Construct maps between IP Addresses, ports and ARProxyConnection
     ip_map = {}
     port_map = {}
-    #heartbeat = mavutil.mavlink.MAVLink_heartbeat_message(mavutil.mavlink.MAV_TYPE_GCS,
+    # heartbeat = mavutil.mavlink.MAVLink_heartbeat_message(mavutil.mavlink.MAV_TYPE_GCS,
     #                                                    mavutil.mavlink.MAV_AUTOPILOT_INVALID,
     #                                                    0,0, mavutil.mavlink.MAV_STATE_STANDBY, 3)
     # count = 1
-    message = mavutil.mavlink.MAVLink_ping_message(time.time()*1E6,1,0,0)
+    message = mavutil.mavlink.MAVLink_ping_message(time.time() * 1E6, 1, 0, 0)
     for key in csv_map:
         if verbose > 1:
             print(key + " mapped to " + str(csv_map[key]))
@@ -322,7 +345,7 @@ def run_proxy(port, csv_map, host="127.0.0.1", verbose=0):
     #mavlink_connection.mav.ping_send(time.time()*1E6,1,0,0)
     #mavlink_connection.mav.seq = 1
     #mavlink_connection.port.sendto(message.pack(mavlink_connection.mav), ("192.168.10.152", 14551))
-    print "Waiting Heartbeat"    
+    print "Waiting Heartbeat"
     mavlink_connection.wait_heartbeat()
     sdk_connection.bind((host, PORTS["NAVDATA"]))
     sdk_connection.setblocking(0)
@@ -374,7 +397,7 @@ def establish_navdata(local):
             print "SSR", NAVDATA_OPTIONS
             t = time.clock()
         if not stream:
-            #print "Init stream"
+            # print "Init stream"
             sock.sendto("\x01\x00\x00\x00", ("192.168.1.1", 5554))
             #print cmd1 % (seq, NAVDATA_OPTIONS)
             sock.sendto(cmd1 % (seq, NAVDATA_OPTIONS), ("192.168.1.1", 5556))
