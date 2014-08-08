@@ -13,7 +13,7 @@ import mavutil
 from tools import *
 
 parser = OptionParser()
-parser.add_option("-f", "--file", dest="file", help="Csv file with mapping", metavar="FILE", default="map.csv")
+parser.add_option("-f", "--file", dest="file", help="Csv file with mapping", metavar="FILE", default="../map.csv")
 parser.add_option("-p", "--port", dest="port", help="Incoming port for ARDrones", metavar="PORT", default="14550")
 parser.add_option("-l", "--local", dest="local", help="Local Host Address", metavar="HOST", default="127.0.0.1")
 parser.add_option("-v", "--verbose", dest="verbose", type="int", help="Verbose Level", metavar="VERBOSE", default=0)
@@ -81,6 +81,7 @@ class ARProxyConnection:
         # MAVLink meta data variables
         self.base_mode = None
         self.custom_mode = None
+        self.emergency = False
         self.status = None
         self.mission_seq = 1
         self.camera_value = 1.0
@@ -97,16 +98,19 @@ class ARProxyConnection:
                 print "%s: Heartbeat" % self.name
             self.base_mode = msg.base_mode
             # print msg.base_mode
-            if self.base_mode & mavutil.mavlink.MAV_MODE_FLAG_GUIDED_ENABLED == 0:
+            if self.emergency:
+                self.custom_mode = 100
+                msg.custom_mode = 100
+            elif self.base_mode & mavutil.mavlink.MAV_MODE_FLAG_GUIDED_ENABLED == 0:
                 self.custom_mode = 9
                 msg.custom_mode = 9
-                #print msg._msgbuf
-                msg._msgbuf[6] = 9
-                crc = mavutil.mavlink.x25crc(msg._msgbuf[1:15])
-                crc.accumulate(chr(50))
-                crc = struct.unpack('BB', struct.pack('H', crc.crc))
-                msg._msgbuf[15] = crc[0]
-                msg._msgbuf[16] = crc[1]
+                # #print msg._msgbuf
+                # msg._msgbuf[6] = 9
+                # crc = mavutil.mavlink.x25crc(msg._msgbuf[1:15])
+                # crc.accumulate(chr(50))
+                # crc = struct.unpack('BB', struct.pack('H', crc.crc))
+                # msg._msgbuf[15] = crc[0]
+                # msg._msgbuf[16] = crc[1]
                 #print msg._msgbuf
             else:
                 self.custom_mode = msg.custom_mode
@@ -122,7 +126,9 @@ class ARProxyConnection:
     def process_from_sdk(self, data):
         if time.clock() - self.request_navdata_time < 0.2:
             return
-        elif data["ARDRONE_STATE"]["NAVDATA_DEMO_MASK"]:
+        else:
+            self.emergency = data["ARDRONE_STATE"]["EMERGENCY_MASK"]
+        if data["ARDRONE_STATE"]["NAVDATA_DEMO_MASK"]:
             self.sdk_call = 0
             if not all(flag in data.keys() for flag in REQUIRED_NAVDATA):
                 if self.verbose > 0:
@@ -136,7 +142,9 @@ class ARProxyConnection:
                 if self.verbose > 0:
                     print "%s: Make MAVLink" % self.name
                 # print data["DEMO"]["CONTROL_STATE"], " ", data["DEMO"]["FLY_STATE"]
-                if data["DEMO"]["CONTROL_STATE"] < 3 and self.change_mode > 3:
+                if self.emergency:
+                    self.custom_mode = 100
+                elif data["DEMO"]["CONTROL_STATE"] < 3 and self.change_mode > 3:
                     self.custom_mode = 9
                 elif self.manual:
                     self.custom_mode = 99
@@ -145,7 +153,6 @@ class ARProxyConnection:
                     self.custom_mode = 3
                     self.change_mode += 1
                 msgs = self.construct_mavlink_messages(data)
-                # print data["GPS"]
                 for key in msgs.keys():
                     self.connection.mav.srcSystem = int(self.ip.split(".")[3])
                     self.connection.port.sendto(msgs[key].pack(self.connection.mav), self.host)
@@ -191,6 +198,8 @@ class ARProxyConnection:
                         print "%s: MANUAL MODE OFF" % self.name
         elif msg.get_type() == "COMMAND_LONG" and msg.command == 100:
             self.invoke_sdk(SDK_EMERGENCY)
+            self.invoke_sdk(SDK_NAVDATA_REQUEST)
+            self.invoke_sdk(SDK_NAVDATA_OPTIONS)
         elif self.manual:
             self.send_manual_command(msg)
         else:
