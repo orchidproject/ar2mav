@@ -19,6 +19,7 @@ parser.add_option("-p", "--port", dest="port", help="Incoming port for ARDrones"
 parser.add_option("-l", "--local", dest="local", help="Local Host Address", metavar="HOST", default="127.0.0.1")
 parser.add_option("-v", "--verbose", dest="verbose", type="int", help="Verbose Level", metavar="VERBOSE", default=0)
 parser.add_option("-t", "--test", action="store_true", dest="test", help="Test SDK", metavar="TEST", default=False)
+parser.add_option("-q", "--qgc", action="store_true", dest="qgc", help="Route to QGC", metavar="QGC", default=False)
 (options, args) = parser.parse_args()
 
 # Constants
@@ -40,6 +41,8 @@ PING_TIMEOUT = 1
 
 SKIP_TYPES = ["SYS_STATUS", "ATTITUDE", "GPS_RAW_INT", "GLOBAL_POSITION_INT", "LOCAL_POSITION_NED", "RAW_IMU",
               "NAV_CONTROLLER_OUTPUT", "VFR_HUD"]
+
+QGC_PORT = 14555
 # Messages
 # HEARTBEAT - sanitised X
 # ATTITUDE - sanitised X
@@ -59,7 +62,7 @@ class ARProxyConnection:
     # 1 - Only information about manual control is printed
     # 2 - Manual Control Information + some extra
     # 3 - All incoming data is printed - detailed messages
-    def __init__(self, name, ip, port, host, verbose=0, repeat=1):
+    def __init__(self, name, ip, port, host, verbose=0, repeat=1, qgc=False):
         self.drone = (ip, PORTS["MAVLINK"])
         self.name = name
         self.ip = ip
@@ -72,6 +75,7 @@ class ARProxyConnection:
         self.manual = -1
         self.emergency = False
         self.verbose = verbose
+        self.qgc = qgc
         # Manual Control variables
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -112,13 +116,14 @@ class ARProxyConnection:
                     if mavutil.all_printable(msg.data):
                         sys.stdout.write(msg.data)
                         sys.stdout.flush()
-                elif self.connection.last_address != self.drone and self.connection.last_address != self.host:
+                elif self.connection.last_address != self.drone and self.connection.last_address != self.host and \
+                        ((not self.qgc) or self.connection.last_address != (self.host[0], QGC_PORT)):
                     if self.verbose > 0:
                         print("Unregistered AUV with IP(MAV): " + self.connection.last_address[0])
-                elif self.connection.last_address != self.host:
-                    self.process_from_drone(msg)
-                else:
+                elif self.connection.last_address != self.drone:
                     self.process_from_host(msg)
+                else:
+                    self.process_from_drone(msg)
             # Receive SDK messages
             try:
                 packet, address = self.sdk.recvfrom(65535)
@@ -168,6 +173,8 @@ class ARProxyConnection:
         self.connection.mav.srcSystem = int(self.ip.split(".")[3])
         # print self.connection.source_system
         self.connection.port.sendto(msg.pack(self.connection.mav), self.host)
+        if self.qgc:
+            self.connection.port.sendto(msg._msgbuf, (self.host[0], QGC_PORT))
         # self.connection.port.sendto(msg._msgbuf, self.host)
         self.drone = (self.ip, self.connection.last_address[1])
 
@@ -402,13 +409,13 @@ def run_proxy(port, csv_map, host="127.0.0.1", verbose=0):
         time.sleep(PING_TIMEOUT)
     # message = mavutil.mavlink.MAVLink_ping_message(time.time()*1E6,1,0,0)
     # mavlink_connection.mav.ping_send(time.time()*1E6,1,0,0)
-    #mavlink_connection.mav.seq = 1
-    #mavlink_connection.port.sendto(message.pack(mavlink_connection.mav), ("192.168.10.152", 14551))
+    # mavlink_connection.mav.seq = 1
+    # mavlink_connection.port.sendto(message.pack(mavlink_connection.mav), ("192.168.10.152", 14551))
     print "Waiting Heartbeat"
     mavlink_connection.wait_heartbeat()
     sdk_connection.bind((host, PORTS["NAVDATA"]))
     sdk_connection.setblocking(0)
-    #print ip_map
+    # print ip_map
     # Main loop
     while True:
         # Receive MAVLink messages
@@ -452,9 +459,9 @@ if __name__ == "__main__":
         for row in content:
             if options.verbose > 0:
                 print(row[1] + " mapped to " + str(row[2]))
-            proxies.append(ARProxyConnection(name=row[0], ip=row[1], port=int(options.port)+len(proxies),
+            proxies.append(ARProxyConnection(name=row[0], ip=row[1], port=int(options.port) + len(proxies),
                                              host=(options.local, int(row[2])),
-                                             verbose=options.verbose))
+                                             verbose=options.verbose, qgc=options.qgc))
             t = threading.Thread(name="Thread-" + str(row[0]), target=proxies[-1].start)
             t.setDaemon(True)
             t.start()

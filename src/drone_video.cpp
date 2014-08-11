@@ -46,9 +46,11 @@ int fetch_video(ros::NodeHandle nh,int drone_port, std::string drone_ip,
 	const uint32_t* payload_size;
 	unsigned char part[buffer_size];
 	int partLength;
+	int errorCount;
 	bool check;
 	x264_image_transport::x264Packet message;
 	index = 0;
+	errorCount = 0;
 	//***************************************************************************
 	//   Initialise connection and publisher
 	//***************************************************************************
@@ -61,15 +63,20 @@ int fetch_video(ros::NodeHandle nh,int drone_port, std::string drone_ip,
 	while (ros::ok()) {
 		if(index == 0) {
 			partLength = recv(socketNumber, part, buffer_size,0);
-			if (partLength <= 0) {
-				ROS_INFO("Did not receive video data, trying to recover.");
+			if (partLength < 0 || errorCount > 5) {
+				ROS_INFO("Did not receive video data, trying to recover[Error Count:%d]", errorCount);
 				close(socketNumber);
 				ros::Duration(timeout.tv_sec).sleep();
 				socketNumber = establish_socket(drone_ip.c_str(), &drone_port, &timeout);
 				index = 0;
 				continue;
 			}
+			else if(partLength == 0){
+				errorCount++;
+				continue;
+			}
 		}
+		errorCount = 0;
 		if (strncmp((const char*) (part+index),"PaVE", 4) != 0) {
 			ROS_INFO("PaVE not synchronized, trying to rebind");
 			for(i = 0;i<buffer_size-index-3;i++)
@@ -97,14 +104,19 @@ int fetch_video(ros::NodeHandle nh,int drone_port, std::string drone_ip,
 			check = false;
 			while (read < *payload_size) {
 				partLength = recv(socketNumber, part+index+*header_size+read, *payload_size - read,0);
-				if(partLength <= 0){
+				if(partLength < 0 || errorCount > 5){
 					check = true;
 					break;
 				}
+				else if(partLength == 0){
+					errorCount++;
+					continue;
+				}
+				errorCount = 0;
 				read += partLength;
 			}
 			if(check){
-				ROS_INFO("Timedout while waiting extra packets.");
+				ROS_INFO("Timedout while waiting extra packets[Error Count:%d]",errorCount);
 				index = 0;
 				continue;
 			}		
