@@ -61,7 +61,7 @@ int fetch_video(ros::NodeHandle nh,int drone_port, std::string drone_ip,
 	while (ros::ok()) {
 		if(index == 0) {
 			partLength = recv(socketNumber, part, buffer_size,0);
-			if (partLength < 0 || errorCount > 100) {
+			if (partLength < 0 || errorCount > 10) {
 				ROS_INFO("Did not receive video data, trying to recover[Error Count:%d]", errorCount);
 				close(socketNumber);
 				ros::Duration(timeout.tv_sec).sleep();
