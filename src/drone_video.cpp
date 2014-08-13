@@ -6,29 +6,16 @@
  * Receives ArDrone 2.0 video stream and publishes it on x264_image_transport
  */
 
-int establish_socket(const char* drone_ip, const int* drone_port, const struct timeval* timeout){
+int establish_socket(sockaddr_in* myAddr, sockaddr_in* droneAddr, const struct timeval* timeout){
 	//***************************************************************************
 	//  Set up sockets
 	//***************************************************************************
-	int socketNumber;
-	
-	sockaddr_in myAddr;
-	sockaddr_in droneAddr;
-
-	myAddr.sin_family = AF_INET;
-	myAddr.sin_addr.s_addr = INADDR_ANY;
-	myAddr.sin_port = htons(*drone_port);
-
-	droneAddr.sin_family = AF_INET;
-	droneAddr.sin_addr.s_addr = inet_addr(drone_ip);
-	droneAddr.sin_port = htons(*drone_port);
-
-	socketNumber = socket(AF_INET, SOCK_STREAM, 0);
-	while(ros::ok() && bind(socketNumber, (sockaddr*) &myAddr, sizeof(sockaddr_in)) < 0) {
+	int socketNumber = socket(AF_INET, SOCK_STREAM, 0);
+	while(ros::ok() && bind(socketNumber, (sockaddr*) myAddr, sizeof(sockaddr_in)) < 0) {
 		ROS_INFO("Failed to bind socket");
 		ros::Duration((*timeout).tv_sec).sleep();
 	}
-	while(ros::ok() && connect(socketNumber, (sockaddr*) &droneAddr, sizeof(sockaddr_in)) != 0) {
+	while(ros::ok() && connect(socketNumber, (sockaddr*) droneAddr, sizeof(sockaddr_in)) != 0) {
 		ROS_INFO("Did not manage to establish connection");
 		ros::Duration((*timeout).tv_sec).sleep();
 	}
@@ -38,6 +25,17 @@ int establish_socket(const char* drone_ip, const int* drone_port, const struct t
 
 int fetch_video(ros::NodeHandle nh,int drone_port, std::string drone_ip, 
 		int buffer_size, struct timeval timeout, std::string topic_name){
+	//***************************************************************************
+	//   Socket Addresses
+	//***************************************************************************
+	sockaddr_in myAddr;
+	sockaddr_in droneAddr;
+	myAddr.sin_family = AF_INET;
+	myAddr.sin_addr.s_addr = INADDR_ANY;
+	myAddr.sin_port = htons(drone_port);
+	droneAddr.sin_family = AF_INET;
+	droneAddr.sin_addr.s_addr = inet_addr(drone_ip.c_str());
+	droneAddr.sin_port = htons(drone_port);
 	//***************************************************************************
 	//   Helper variables
 	//***************************************************************************
@@ -54,7 +52,7 @@ int fetch_video(ros::NodeHandle nh,int drone_port, std::string drone_ip,
 	//***************************************************************************
 	//   Initialise connection and publisher
 	//***************************************************************************
-	int socketNumber = establish_socket(drone_ip.c_str(), &drone_port, &timeout);
+	int socketNumber = establish_socket(&myAddr, &droneAddr, &timeout);
 	ros::Publisher pub = nh.advertise<x264_image_transport::x264Packet>(topic_name, 1000);
 	//***************************************************************************
 	//   Decode PaVE packet and send the encoded video stream
@@ -63,11 +61,12 @@ int fetch_video(ros::NodeHandle nh,int drone_port, std::string drone_ip,
 	while (ros::ok()) {
 		if(index == 0) {
 			partLength = recv(socketNumber, part, buffer_size,0);
-			if (partLength < 0 || errorCount > 5) {
+			if (partLength < 0 || errorCount > 100) {
 				ROS_INFO("Did not receive video data, trying to recover[Error Count:%d]", errorCount);
 				close(socketNumber);
 				ros::Duration(timeout.tv_sec).sleep();
-				socketNumber = establish_socket(drone_ip.c_str(), &drone_port, &timeout);
+				socketNumber = establish_socket(&myAddr, &droneAddr, &timeout);
+				errorCount = 0;
 				index = 0;
 				continue;
 			}
@@ -104,7 +103,7 @@ int fetch_video(ros::NodeHandle nh,int drone_port, std::string drone_ip,
 			check = false;
 			while (read < *payload_size) {
 				partLength = recv(socketNumber, part+index+*header_size+read, *payload_size - read,0);
-				if(partLength < 0 || errorCount > 5){
+				if(partLength < 0 || errorCount > 100){
 					check = true;
 					break;
 				}
