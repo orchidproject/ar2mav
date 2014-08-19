@@ -93,6 +93,7 @@ class ARProxyConnection:
         self.status = None
         self.mission_seq = 1
         self.camera_value = 1.0
+        self.relative_alt = 0.0
 
     def start(self):
         self.connection = mavutil.mavlink_connection(self.host[0] + ":" + str(self.port))
@@ -148,13 +149,13 @@ class ARProxyConnection:
         if msg.get_type() == "HEARTBEAT":
             # print self.name, " from ", self.connection.source_system
             if self.verbose > 0:
-                print "%s: Heartbeat" % self.name
+                print str(self.name) + ": Heartbeat (" + str(msg.base_mode) + "," + str(msg.custom_mode) + ")"
             self.base_mode = msg.base_mode
             # print msg.base_mode
             if self.emergency:
                 self.custom_mode = 100
                 msg.custom_mode = 100
-            elif self.base_mode & mavutil.mavlink.MAV_MODE_FLAG_GUIDED_ENABLED == 0:
+            elif self.relative_alt == 0.0:
                 self.custom_mode = 9
                 msg.custom_mode = 9
                 # #print msg._msgbuf
@@ -170,6 +171,9 @@ class ARProxyConnection:
             self.status = msg.system_status
         if msg.get_type() == "MISSION_CURRENT":
             self.mission_seq = msg.seq
+        if msg.get_type() == "GLOBAL_POSITION_INT":
+            #TODO add to SDK
+            self.relative_alt = msg.relative_alt / 1E3
         self.connection.mav.srcSystem = int(self.ip.split(".")[3])
         # print self.connection.source_system
         self.connection.port.sendto(msg.pack(self.connection.mav), self.host)
@@ -253,8 +257,8 @@ class ARProxyConnection:
                         print "%s: MANUAL MODE OFF" % self.name
         elif msg.get_type() == "COMMAND_LONG" and msg.command == 100:
             self.invoke_sdk(SDK_EMERGENCY)
-            self.invoke_sdk(SDK_NAVDATA_REQUEST)
-            self.invoke_sdk(SDK_NAVDATA_OPTIONS)
+            #self.invoke_sdk(SDK_NAVDATA_REQUEST)
+            #self.invoke_sdk(SDK_NAVDATA_OPTIONS)
         elif msg.get_type() == "COMMAND_LONG" and msg.command == 255:
             self.alive = False
         elif self.manual:
@@ -362,6 +366,7 @@ class ARProxyConnection:
             struct.unpack("h", struct.pack("h", round(data["DEMO"]["VY"] / 10)))[0],
             struct.unpack("h", struct.pack("h", round(data["DEMO"]["VZ"] / 10)))[0],
             0)
+        self.relative_alt = round(data["DEMO"]["ALTITUDE"]) / 1E3
         messages["GPS_RAW_INT"] = mavutil.mavlink.MAVLink_gps_raw_int_message(
             struct.unpack("Q", struct.pack("Q", round(data["GPS"]["LAST_FRAME_TIME"] * 1E3)))[0], 0,
             struct.unpack("i", struct.pack("i", round(data["GPS"]["LATITUDE"] * 1E7)))[0],
