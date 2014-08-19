@@ -105,7 +105,6 @@ include_directories(
 ## Declare a cpp executable
 # add_executable(ar2mav_node src/ar2mav_node.cpp)
 add_executable(drone_video src/drone_video.cpp)
-add_executable(video_display src/video_display.cpp)
 
 ## Add cmake target dependencies of the executable/library
 ## as an example, message headers may need to be generated before nodes
@@ -113,9 +112,6 @@ add_executable(video_display src/video_display.cpp)
 
 ## Specify libraries to link a library or executable target against
 target_link_libraries(drone_video
-  ${catkin_LIBRARIES}
-)
-target_link_libraries(video_display
   ${catkin_LIBRARIES}
 )
 
