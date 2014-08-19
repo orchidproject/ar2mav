@@ -18,7 +18,7 @@ The module was developed as part of the MOSAIC project.
 8. python setup.py install
 9. Installation is complete with a stable version of MAVLink
 
-### Multiple Drones ###
+### Multiple Drones 
 
 For enabling the connection of multiple drones several steps are required:
 
@@ -33,5 +33,6 @@ For enabling the connection of multiple drones several steps are required:
 8. nc -w 3 192.168.1.1 1234 < autoconnect.sh (on your computer)
 9. chmod 777 autoconnect.sh (on the drone)
 
-This should have your drone set up for connection. If you want a one time connection just do ./autoconnect.sh &, if you want this script to be run on boot up of the drone you have to edit the file /bin/wifi_setup.sh on the drone and add the following line at the bottom:
-/home/default/wifi/autoconnect.sh &
+This should have your drone set up for connection. If you want a one time connection just do`./autoconnect.sh &`, if you want this script to be run on boot up of the drone you have to edit the file /bin/wifi_setup.sh on the drone and add the following line at the bottom:
+
+`/home/default/wifi/autoconnect.sh &`
