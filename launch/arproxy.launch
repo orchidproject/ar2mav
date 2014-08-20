@@ -1,3 +1,3 @@
 <launch>
-   <node pkg="ar2mav" type="arproxy.py" name="arproxy" respawn="false" output="screen" args="-f $(find ar2mav)/map.csv -v 1 -l 192.168.1.2" />
+   <node pkg="ar2mav" type="arproxy.py" name="arproxy" respawn="false" output="screen" args="-f $(find ar2mav)/drones.yaml -v 1 -l 192.168.10.102" />
 </launch>

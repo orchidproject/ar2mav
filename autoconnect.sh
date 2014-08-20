@@ -17,10 +17,10 @@ LOG=$INSTALL_PATH/log
 
 # Settings
 ESSID=DroNet24
-IP=192.168.10.151
+IP=192.168.10.152
 NETMASK=255.255.255.0
-TIMEOUT_LOOP=30
-TIMEOUT_CON=30
+TIMEOUT=30
+TIMEOUT_DISCONNECT=30
 # ARDrone default addresses
 BASE_ADDRESS=192.168.1.
 LAST_NUMBER="2 3 4 5"
@@ -36,65 +36,67 @@ if [ -n "$DRONESSID" ]
 then
   echo "Found drone ssid =$DRONESSID"
 else
-	# Default SSID.
-	DRONESSID=ardrone_wifi
+        # Default SSID.
+        DRONESSID=ardrone_wifi
 fi
 
 echo "Network configuration" > $LOG
-echo "Drone SSID                : $DRONESSID" >> $LOG
-echo "Access Point ESSID        : $ESSID" >> $LOG
-echo "Infrastructure IP address : $IP" >> $LOG
-echo "Infrastructure Netmask    : $NETMASK" >>$LOG
-echo "Loop timeout              : $TIMEOUT_LOOP" >>$LOG
-echo "Connection timeout        : $TIMEOUT_CON" >>$LOG
+echo "Drone SSID                  : $DRONESSID" >> $LOG
+echo "Access Point ESSID          : $ESSID" >> $LOG
+echo "Infrastructure IP address   : $IP" >> $LOG
+echo "Infrastructure Netmask      : $NETMASK" >>$LOG
+echo "Timeout                     : $TIMEOUT" >>$LOG
+echo "Disconnection extra timeout : $TIMEOUT_DISCONNECT" >>$LOG
 
 while [ 1 ]
 do
-    CONFIG=`iwconfig ath0`
-    # First check if we are connected to infrastructure and it is in range
-    if `echo $CONFIG | grep -q $ESSID` ;
-    then
-        # if ping -W 1 -c 1 -q $IP ;
-        # Signal level:-96 dBm indicates we lost the signal in managed mode (this is the lowest value)
-        if `echo $CONFIG | grep -q "Signal level:-96 dBm"` ;
+        CONFIG=`iwconfig ath0`
+        # First check if we are connected to infrastructure and it is in range
+        if `echo $CONFIG | grep -q $ESSID` ;
         then
-            echo "Restoring default drone network with SSID $DRONESSID" >> $LOG
-			killall udhcpc
-			udhcpd /tmp/udhcpd.conf
-			ifconfig ath0 down                                        
-			iwconfig ath0 mode Master essid $DRONESSID channel auto commit
-			ifconfig ath0 192.168.1.1 netmask 255.255.255.0 up
-			sleep $TIMEOUT_CON
+                # if ping -W 1 -c 1 -q $IP ;
+                # Signal level:-96 dBm indicates we lost the signal in managed mode (this is the lowest value)
+                if `echo $CONFIG | grep -q "Signal level:-96 dBm"` ;
+                then
+                        echo "Restoring default drone network with SSID $DRONESSID" >> $LOG
+                        killall udhcpc
+                        udhcpd /tmp/udhcpd.conf
+                        ifconfig ath0 down                                        
+                        iwconfig ath0 mode Master essid $DRONESSID channel auto commit
+                        ifconfig ath0 192.168.1.1 netmask 255.255.255.0 up
+			sleep $TIMEOUT_DISCONNECT
+                else
+                        echo "Connected to $ESSID" >> $LOG
+                fi		
+        else
+                # If we are connected to the default network check if anyone connected
+                CONNECTED=0 
+                for i in $LAST_NUMBER
+                do
+                        if ping -W 1 -c 1 -q $BASE_ADDRESS$i ; 
+                        then
+                                CONNECTED=1
+                                echo "Address $BASE_ADDRESS$i connected to default" >> $LOG
+                                break
+                        fi
+                done  
+                # If noone connected try again infrastructure 
+                if [ "$CONNECTED" -eq 0 ] ; 
+                then
+                        echo "Switching to Managed mode with ESSID : $ESSID" >> $LOG
+                        killall udhcpd
+                        ifconfig ath0 down
+                        iwconfig ath0 mode Managed essid $ESSID ap any channel auto commit
+                        if [ -n "$IP" ]; 
+                        then
+                                echo "Using settings: $IP $NETMASK" >> $LOG 
+                                ifconfig ath0 $IP netmask $NETMASK up
+                        else
+                                echo "Using DHCP settings" >> $LOG
+                                ifconfig ath0 up
+                                udhcpc -b -i ath0 >> $LOG
+                        fi
+                fi
         fi
-	else
-        # If we are connected to the default network check if anyone connected
-		CONNECTED=0 
-		for i in $LAST_NUMBER
-		do
-			if ping -W 1 -c 1 -q $BASE_ADDRESS$i ; 
-            then
-			  CONNECTED=1
-			  echo "Address $BASE_ADDRESS$i connected to default" >> $LOG
-			  break
-			fi
-		done  
-		# If noone connected try again infrastructure 
-		if [ "$CONNECTED" -eq 0 ] ; 
-        then
-            echo "Switching to Managed mode with ESSID : $ESSID" >> $LOG
-            killall udhcpd
-  		    ifconfig ath0 down
-			iwconfig ath0 mode Managed essid $ESSID ap any channel auto commit
-            if [ -n "$IP" ]; 
-  		    then
-				echo "Using settings: $IP $NETMASK" >> $LOG 
-				ifconfig ath0 $IP netmask $NETMASK up
-			else
-				echo "Using DHCP settings" >> $LOG
-				ifconfig ath0 up
-				udhcpc -b -i ath0 >> $LOG
-			fi
-        fi
-	fi
-	sleep $TIMEOUT_LOOP      
+        sleep $TIMEOUT      
 done

@@ -1,5 +1,4 @@
 #!/usr/bin/python
-import csv
 import sys
 import os
 import socket
@@ -43,6 +42,8 @@ SKIP_TYPES = ["SYS_STATUS", "ATTITUDE", "GPS_RAW_INT", "GLOBAL_POSITION_INT", "L
               "NAV_CONTROLLER_OUTPUT", "VFR_HUD"]
 
 QGC_PORT = 14555
+EMERGENCY_CODE = 100
+KILL_CODE = 255
 # Messages
 # HEARTBEAT - sanitised X
 # ATTITUDE - sanitised X
@@ -96,6 +97,7 @@ class ARProxyConnection:
         self.relative_alt = 0.0
 
     def start(self):
+        print("%s is starting..." % self.name)
         self.connection = mavutil.mavlink_connection(self.host[0] + ":" + str(self.port))
         self.sdk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sdk.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -172,7 +174,7 @@ class ARProxyConnection:
         if msg.get_type() == "MISSION_CURRENT":
             self.mission_seq = msg.seq
         if msg.get_type() == "GLOBAL_POSITION_INT":
-            #TODO add to SDK
+            # TODO add to SDK
             self.relative_alt = msg.relative_alt / 1E3
         self.connection.mav.srcSystem = int(self.ip.split(".")[3])
         # print self.connection.source_system
@@ -255,11 +257,11 @@ class ARProxyConnection:
                     self.connection.port.sendto(msg._msgbuf, self.drone)
                     if self.verbose > 0:
                         print "%s: MANUAL MODE OFF" % self.name
-        elif msg.get_type() == "COMMAND_LONG" and msg.command == 100:
+        elif msg.get_type() == "COMMAND_LONG" and msg.command == EMERGENCY_CODE:
             self.invoke_sdk(SDK_EMERGENCY)
-            #self.invoke_sdk(SDK_NAVDATA_REQUEST)
+            # self.invoke_sdk(SDK_NAVDATA_REQUEST)
             #self.invoke_sdk(SDK_NAVDATA_OPTIONS)
-        elif msg.get_type() == "COMMAND_LONG" and msg.command == 255:
+        elif msg.get_type() == "COMMAND_LONG" and msg.command == KILL_CODE:
             self.alive = False
         elif self.manual:
             self.send_manual_command(msg)
@@ -388,93 +390,47 @@ def print_msg(prefix, msg):
             prefix, msg.get_type(), ", ".join("%s:%s" % (i, str(msg.__dict__[i])) for i in msg._fieldnames))
 
 
-def run_proxy(port, csv_map, host="127.0.0.1", verbose=0):
-    # Note that the csv_map should contain IP addresses mapped to triples from the csv file
-    # CSV file should have every entry on new line and each entry consists of the triple (name, ip, port)
-    mavlink_connection = mavutil.mavlink_connection(host + ":" + port)
-    sdk_connection = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sdk_connection.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    # Construct maps between IP Addresses, ports and ARProxyConnection
-    ip_map = {}
-    port_map = {}
-    # heartbeat = mavutil.mavlink.MAVLink_heartbeat_message(mavutil.mavlink.MAV_TYPE_GCS,
-    # mavutil.mavlink.MAV_AUTOPILOT_INVALID,
-    # 0,0, mavutil.mavlink.MAV_STATE_STANDBY, 3)
-    # count = 1
-    message = mavutil.mavlink.MAVLink_ping_message(time.time() * 1E6, 1, 0, 0)
-    for key in csv_map:
-        if verbose > 1:
-            print(key + " mapped to " + str(csv_map[key]))
-        ip_map[key] = ARProxyConnection(csv_map[key][0], key, mavlink_connection, sdk_connection,
-                                        (host, int(csv_map[key][2])), verbose)
-        port_map[int(csv_map[key][2])] = ip_map[key]
-    for i in range(PING_TIMES):
-        for key in csv_map:
-            mavlink_connection.port.sendto(message.pack(mavlink_connection.mav), (key, PORTS["MAVLINK"]))
-        time.sleep(PING_TIMEOUT)
-    # message = mavutil.mavlink.MAVLink_ping_message(time.time()*1E6,1,0,0)
-    # mavlink_connection.mav.ping_send(time.time()*1E6,1,0,0)
-    # mavlink_connection.mav.seq = 1
-    # mavlink_connection.port.sendto(message.pack(mavlink_connection.mav), ("192.168.10.152", 14551))
-    print "Waiting Heartbeat"
-    mavlink_connection.wait_heartbeat()
-    sdk_connection.bind((host, PORTS["NAVDATA"]))
-    sdk_connection.setblocking(0)
-    # print ip_map
-    # Main loop
-    while True:
-        # Receive MAVLink messages
-        msg = mavlink_connection.recv_match(blocking=False)
-        if msg:
-            #print msg
-            if msg.get_type() == "BAD_DATA":
-                if mavutil.all_printable(msg.data):
-                    sys.stdout.write(msg.data)
-                    sys.stdout.flush()
-            elif mavlink_connection.last_address[0] not in ip_map.keys() and mavlink_connection.last_address[0] != host:
-                if verbose > 0:
-                    print("Unregistered AUV with IP(MAV): " + mavlink_connection.last_address[0])
-            elif mavlink_connection.last_address[0] != host:
-                ip_map[mavlink_connection.last_address[0]].process_from_drone(msg)
-            else:
-                port_map[mavlink_connection.last_address[1]].process_from_host(msg)
-        # Receive SDK messages
-        try:
-            packet, address = sdk_connection.recvfrom(65535)
-            if address[0] not in ip_map.keys():
-                if verbose > 0:
-                    print "Unregistered AUV with IP(SDK): ", address[0]
-            else:
-                ip_map[address[0]].process_from_sdk(decode_navdata(packet))
-        except socket.error as e:
-            if e.errno not in [errno.EAGAIN, errno.EWOULDBLOCK, errno.ECONNREFUSED]:
-                raise
+def load_file(path):
+    mapping = dict()
+    if path.endswith(".yaml"):
+        import yaml
 
+        stream = open(path, "r")
+        mapping = yaml.load(stream)["drones"]
+        stream.close()
+    elif path.endswith(".csv"):
+        import csv
+
+        stream = open(path, "r")
+        content = csv.reader(stream)
+        i = 1
+        for row in content:
+            if len(row) == 4:
+                mapping[row[0]] = dict()
+                mapping[row[0]]["ip"] = row[1]
+                mapping[row[0]]["in_port"] = int(row[2])
+                mapping[row[0]]["out_port"] = int(row[3])
+            else:
+                print("Skipping row %i, not of length 4" % i)
+            i += 1
+        stream.close()
+    else:
+        print("File not yaml or csv, using default settings")
+        mapping["Parrot"] = dict()
+        mapping["Parrot"]["ip"] = "192.168.1.1"
+        mapping["Parrot"]["in_port"] = 57001
+        mapping["Parrot"]["out_port"] = 58001
+    return mapping
 
 if __name__ == "__main__":
-    # Load csv file
-    f = open(options.file, mode='r')
-    content = csv.reader(f, delimiter=',')
-    # Run
-    if options.test:
-        establish_navdata(options.local)
-    else:
-        # run_proxy(options.port, csv_map, options.local, options.verbose)
-        proxies = list()
-        for row in content:
-            if options.verbose > 0:
-                print(row[1] + " mapped to " + str(row[2]))
-            proxies.append(ARProxyConnection(name=row[0], ip=row[1], port=int(options.port) + len(proxies),
-                                             host=(options.local, int(row[2])),
-                                             verbose=options.verbose, qgc=options.qgc))
-            t = threading.Thread(name="Thread-" + str(row[0]), target=proxies[-1].start)
-            t.setDaemon(True)
-            t.start()
-        f.close()
-        try:
-            while 1:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            for proxy in proxies:
-                proxy.stop()
-            time.sleep(1)
+    drones = load_file(options.file)
+    proxies = list()
+    for name, data in drones.iteritems():
+        if options.verbose > 0:
+            print("%s with IP:%s mapped from port %d to port %d" % (name, data["ip"], data["in_port"], data["out_port"]))
+        proxies.append(ARProxyConnection(name=name, ip=data["ip"], port=data["in_port"],
+                                         host=(options.local, data["out_port"]),
+                                         verbose=options.verbose, qgc=options.qgc))
+        t = threading.Thread(name="Thread-" + name, target=proxies[-1].start)
+        t.setDaemon(True)
+        t.start()
