@@ -6,3 +6,4 @@ drones: {
 'Kevin': {ip: '192.168.10.154', in_port: 57154, out_port: 58154},
 'Iago': {ip: '192.168.10.155', in_port: 57155, out_port: 58155}
 }
+drones_active: ['Tweety', 'Iago']

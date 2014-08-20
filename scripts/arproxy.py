@@ -3,7 +3,6 @@ import sys
 import os
 import socket
 import errno
-from optparse import OptionParser
 import time
 from math import pi
 import threading
@@ -48,18 +47,20 @@ KILL_CODE = 255
 # SYS_STATUS - sanitised X
 # VFR_HUD - not used by AR Drone 2.0
 
+
 class ARProxyConnection:
     # Verbose levels are 4:
     # 0 - Nothing printed
     # 1 - Only information about manual control is printed
     # 2 - Manual Control Information + some extra
     # 3 - All incoming data is printed - detailed messages
-    def __init__(self, name, ip, in_port, destination, verbose=0, repeat=1, qgc=False):
+    def __init__(self, name, ip, in_port, destination, nav_data_port, verbose=0, repeat=1, qgc=False):
         self.drone = (ip, PORTS["MAVLINK"])
         self.name = name
         self.ip = ip
         self.port = in_port
         self.host = destination
+        self.nav_data_port = nav_data_port
         self.connection = None
         self.sdk = None
         self.alive = False
@@ -88,6 +89,7 @@ class ARProxyConnection:
         self.relative_alt = 0.0
 
     def start(self):
+        print("[AR2MAV]%s: ADDRESS: %s" %(self.name, str(self.drone)))
         self.connection = mavutil.mavlink_connection(self.host[0] + ":" + str(self.port))
         self.sdk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sdk.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -97,7 +99,7 @@ class ARProxyConnection:
             time.sleep(PING_TIMEOUT)
         print("[AR2MAV]%s: Waiting Heartbeat" % self.name)
         self.connection.wait_heartbeat()
-        self.sdk.bind((self.host[0], PORTS["NAVDATA"]))
+        self.sdk.bind((self.host[0], self.nav_data_port))
         self.sdk.setblocking(0)
         self.alive = True
         while self.alive:
@@ -112,7 +114,7 @@ class ARProxyConnection:
                 elif self.connection.last_address != self.drone and self.connection.last_address != self.host and \
                         ((not self.qgc) or self.connection.last_address != (self.host[0], QGC_PORT)):
                     if self.verbose > 0:
-                        print("[AR2MAV]Unregistered AUV with IP(MAV): " + self.connection.last_address[0])
+                        print("[AR2MAV]%s: Unregistered AUV with IP(MAV): %s" % (self.name, self.connection.last_address[0]))
                 elif self.connection.last_address != self.drone:
                     self.process_from_host(msg)
                 else:
@@ -121,8 +123,9 @@ class ARProxyConnection:
             try:
                 packet, address = self.sdk.recvfrom(65535)
                 if address[0] != self.drone[0]:
-                    if self.verbose > 0:
-                        print("[AR2MAV]Unregistered AUV with IP(SDK): " + str(address[0]))
+                    self.sdk.sento(msg._msgbuf, (self.host[0], self.nav_data_port+1))
+                    #if self.verbose > 0:
+                    #    print("[AR2MAV]%sU nregistered AUV with IP(SDK): " % self.name + str(address[0]) + "-" + str(self.drone))
                 else:
                     self.process_from_sdk(decode_navdata(packet))
             except socket.error as e:
@@ -172,7 +175,7 @@ class ARProxyConnection:
         if self.qgc:
             self.connection.port.sendto(msg._msgbuf, (self.host[0], QGC_PORT))
         # self.connection.port.sendto(msg._msgbuf, self.host)
-        self.drone = (self.ip, self.connection.last_address[1])
+        #self.drone = (self.ip, self.connection.last_address[1])
 
     def process_from_sdk(self, data):
         if time.clock() - self.request_navdata_time < 0.2:
@@ -384,13 +387,13 @@ def load_file(path):
     mapping = dict()
     if path.endswith(".yaml"):
         import yaml
-
         stream = open(path, "r")
-        mapping = yaml.load(stream)["drones"]
+        content = yaml.load(stream)
         stream.close()
+        for name in content["drones_active"]:
+            mapping[name] = content["drones"][name]
     elif path.endswith(".csv"):
         import csv
-
         stream = open(path, "r")
         content = csv.reader(stream)
         i = 1
@@ -413,9 +416,14 @@ def load_file(path):
     return mapping
 
 
+# #******************************************************************************
+# Parse any arguments that follow the node command
+# *******************************************************************************
+from optparse import OptionParser
+
 parser = OptionParser()
 parser.add_option("-f", "--file", dest="file", help="File with mapping of drone names,ips,ports", metavar="FILE",
-                  default="../map.csv")
+                  default="../drones.yaml")
 parser.add_option("-p", "--port", dest="port", help="Incoming port for ARDrones", metavar="PORT", default="14550")
 parser.add_option("-l", "--local", dest="local", help="Local Host Address", metavar="HOST", default="127.0.0.1")
 parser.add_option("-v", "--verbose", dest="verbose", type="int", help="Verbose Level", metavar="VERBOSE", default=0)
@@ -431,7 +439,11 @@ if __name__ == "__main__":
                 key, data["ip"], data["in_port"], data["out_port"]))
         proxies.append(ARProxyConnection(name=key, ip=data["ip"], in_port=data["in_port"],
                                          destination=(options.local, data["out_port"]),
+                                         nav_data_port=PORTS["NAVDATA"] + len(proxies),
                                          verbose=options.verbose, qgc=options.qgc))
         t = threading.Thread(name="Thread-" + key, target=proxies[-1].start)
         t.setDaemon(True)
         t.start()
+    time.sleep(30)
+    while proxies[0].alive:
+        time.sleep(30)
