@@ -12,15 +12,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..
 import mavutil
 from tools import *
 
-parser = OptionParser()
-parser.add_option("-f", "--file", dest="file", help="Csv file with mapping", metavar="FILE", default="../map.csv")
-parser.add_option("-p", "--port", dest="port", help="Incoming port for ARDrones", metavar="PORT", default="14550")
-parser.add_option("-l", "--local", dest="local", help="Local Host Address", metavar="HOST", default="127.0.0.1")
-parser.add_option("-v", "--verbose", dest="verbose", type="int", help="Verbose Level", metavar="VERBOSE", default=0)
-parser.add_option("-t", "--test", action="store_true", dest="test", help="Test SDK", metavar="TEST", default=False)
-parser.add_option("-q", "--qgc", action="store_true", dest="qgc", help="Route to QGC", metavar="QGC", default=False)
-(options, args) = parser.parse_args()
-
 # Constants
 REQUIRED_NAVDATA = ("DEMO", "GPS", "TIME", "GYROS_OFFSETS")
 NAVDATA_OPTIONS = 0
@@ -63,12 +54,12 @@ class ARProxyConnection:
     # 1 - Only information about manual control is printed
     # 2 - Manual Control Information + some extra
     # 3 - All incoming data is printed - detailed messages
-    def __init__(self, name, ip, port, host, verbose=0, repeat=1, qgc=False):
+    def __init__(self, name, ip, in_port, destination, verbose=0, repeat=1, qgc=False):
         self.drone = (ip, PORTS["MAVLINK"])
         self.name = name
         self.ip = ip
-        self.port = port
-        self.host = host
+        self.port = in_port
+        self.host = destination
         self.connection = None
         self.sdk = None
         self.alive = False
@@ -97,7 +88,6 @@ class ARProxyConnection:
         self.relative_alt = 0.0
 
     def start(self):
-        print("%s is starting..." % self.name)
         self.connection = mavutil.mavlink_connection(self.host[0] + ":" + str(self.port))
         self.sdk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sdk.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -105,7 +95,7 @@ class ARProxyConnection:
             self.connection.port.sendto(
                 mavutil.mavlink.MAVLink_ping_message(time.time() * 1E6, 1, 0, 0).pack(self.connection.mav), self.drone)
             time.sleep(PING_TIMEOUT)
-        print "%s: Waiting Heartbeat" % self.name
+        print("[AR2MAV]%s: Waiting Heartbeat" % self.name)
         self.connection.wait_heartbeat()
         self.sdk.bind((self.host[0], PORTS["NAVDATA"]))
         self.sdk.setblocking(0)
@@ -122,7 +112,7 @@ class ARProxyConnection:
                 elif self.connection.last_address != self.drone and self.connection.last_address != self.host and \
                         ((not self.qgc) or self.connection.last_address != (self.host[0], QGC_PORT)):
                     if self.verbose > 0:
-                        print("Unregistered AUV with IP(MAV): " + self.connection.last_address[0])
+                        print("[AR2MAV]Unregistered AUV with IP(MAV): " + self.connection.last_address[0])
                 elif self.connection.last_address != self.drone:
                     self.process_from_host(msg)
                 else:
@@ -132,7 +122,7 @@ class ARProxyConnection:
                 packet, address = self.sdk.recvfrom(65535)
                 if address[0] != self.drone[0]:
                     if self.verbose > 0:
-                        print "Unregistered AUV with IP(SDK): ", address[0]
+                        print("[AR2MAV]Unregistered AUV with IP(SDK): " + str(address[0]))
                 else:
                     self.process_from_sdk(decode_navdata(packet))
             except socket.error as e:
@@ -193,7 +183,7 @@ class ARProxyConnection:
             self.sdk_call = 0
             if not all(flag in data.keys() for flag in REQUIRED_NAVDATA):
                 if self.verbose > 0:
-                    print "%s: No NAVDATA" % self.name
+                    print("[AR2MAV]%s: No NAVDATA" % self.name)
                 if self.verbose > 2:
                     print self.name, data.keys()
                 self.invoke_sdk(SDK_NAVDATA_COMMAND)
@@ -201,11 +191,11 @@ class ARProxyConnection:
                 self.invoke_sdk(SDK_ACK)
             elif time.clock() - self.mav_last > self.mav_interval:
                 if self.verbose > 0:
-                    print "%s: Make MAVLink" % self.name
+                    print("[AR2MAV]%s: Make MAVLink" % self.name)
                 # print data["DEMO"]["CONTROL_STATE"], " ", data["DEMO"]["FLY_STATE"]
                 if self.emergency:
                     self.custom_mode = 100
-                elif data["DEMO"]["CONTROL_STATE"] < 3 and self.change_mode > 3:
+                elif data["DEMO"]["CONTROL_STATE"] < 3 < self.change_mode:
                     self.custom_mode = 9
                 elif self.manual:
                     self.custom_mode = 99
@@ -222,12 +212,12 @@ class ARProxyConnection:
             if self.sdk_call == 0:
                 self.sdk_call = time.clock()
             if time.clock() - self.sdk_call > 5:
-                print "%s: NAVDATA DEMO GONE WRONG for more than 5 seconds" % self.name
-                print "%s: Switching back to MANUAL" % self.name
+                print("[AR2MAV]%s: NAVDATA DEMO GONE WRONG for more than 5 seconds" % self.name)
+                print("[AR2MAV]%s: Switching back to MANUAL" % self.name)
                 self.manual = False
             else:
                 if self.verbose > 0:
-                    print "%s: NAVDATA DEMO GONE WRONG" % self.name
+                    print("[AR2MAV]%s: NAVDATA DEMO GONE WRONG" % self.name)
                 self.invoke_sdk(SDK_NAVDATA_COMMAND)
                 self.invoke_sdk(SDK_NAVDATA_OPTIONS)
                 self.invoke_sdk(SDK_ACK)
@@ -237,7 +227,7 @@ class ARProxyConnection:
             print_msg("From Ground(%s[%d]):" % (self.name, self.manual), msg)
         if self.manual == -1:
             if self.verbose > 0:
-                print "%s: No drone" % self.name
+                print("[AR2MAV]%s: No drone" % self.name)
             return
         elif msg.get_type() == "SET_MODE":
             # print msg.base_mode, " ", msg.custom_mode
@@ -249,18 +239,18 @@ class ARProxyConnection:
                     self.invoke_sdk(SDK_NAVDATA_REQUEST)
                     self.invoke_sdk(SDK_NAVDATA_OPTIONS)
                     if self.verbose > 0:
-                        print "%s: MANUAL MODE ON" % self.name
+                        print("[AR2MAV]%s: MANUAL MODE ON" % self.name)
                 elif msg.custom_mode == 3:
                     self.manual = 0
                     self.custom_mode = 3
                     self.change_mode = 0
                     self.connection.port.sendto(msg._msgbuf, self.drone)
                     if self.verbose > 0:
-                        print "%s: MANUAL MODE OFF" % self.name
+                        print("[AR2MAV]%s: MANUAL MODE OFF" % self.name)
         elif msg.get_type() == "COMMAND_LONG" and msg.command == EMERGENCY_CODE:
             self.invoke_sdk(SDK_EMERGENCY)
             # self.invoke_sdk(SDK_NAVDATA_REQUEST)
-            #self.invoke_sdk(SDK_NAVDATA_OPTIONS)
+            # self.invoke_sdk(SDK_NAVDATA_OPTIONS)
         elif msg.get_type() == "COMMAND_LONG" and msg.command == KILL_CODE:
             self.alive = False
         elif self.manual:
@@ -278,7 +268,7 @@ class ARProxyConnection:
             elif msg.command == mavutil.mavlink.MAV_CMD_NAV_LAND:
                 self.invoke_sdk(SDK_COMMAND, COMMAND_LAND)
             elif self.verbose > 0:
-                print "%s Unsupported manual command: %d" % (self.name, msg.command)
+                print("[AR2MAV]%s Unsupported manual command: %d" % (self.name, msg.command))
         elif msg.get_type() == "PARAM_SET" and "CAM-RECORD_HORI" in msg.param_id:
             # print "SS ", msg.param_id, ":", msg.param_id == "CAM-RECORD_HORI"
             self.invoke_sdk(SDK_CAMERA, extra=msg.param_value)
@@ -336,7 +326,7 @@ class ARProxyConnection:
         for i in range(self.repeat):
             self.sdk.sendto(msg.format(self.cmd_seq + i), (self.drone[0], PORTS["AT"]))
             if self.verbose > 2:
-                print self.name, msg.format(self.cmd_seq + i)
+                print("[AR2MAV]" + str(self.name) + str(msg.format(self.cmd_seq + i)))
         self.cmd_seq += self.repeat
 
     def construct_mavlink_messages(self, data):
@@ -386,8 +376,8 @@ class ARProxyConnection:
 
 def print_msg(prefix, msg):
     if msg.get_type() not in SKIP_TYPES:
-        print "%s %s[%s]" % (
-            prefix, msg.get_type(), ", ".join("%s:%s" % (i, str(msg.__dict__[i])) for i in msg._fieldnames))
+        print("[AR2MAV]%s %s[%s]" % (
+            prefix, msg.get_type(), ", ".join("%s:%s" % (i, str(msg.__dict__[i])) for i in msg._fieldnames)))
 
 
 def load_file(path):
@@ -411,26 +401,37 @@ def load_file(path):
                 mapping[row[0]]["in_port"] = int(row[2])
                 mapping[row[0]]["out_port"] = int(row[3])
             else:
-                print("Skipping row %i, not of length 4" % i)
+                print("[AR2MAV]Skipping row %i, not of length 4" % i)
             i += 1
         stream.close()
     else:
-        print("File not yaml or csv, using default settings")
+        print("[AR2MAV]File not yaml or csv, using default settings")
         mapping["Parrot"] = dict()
         mapping["Parrot"]["ip"] = "192.168.1.1"
         mapping["Parrot"]["in_port"] = 57001
         mapping["Parrot"]["out_port"] = 58001
     return mapping
 
+
+parser = OptionParser()
+parser.add_option("-f", "--file", dest="file", help="Csv file with mapping", metavar="FILE", default="../map.csv")
+parser.add_option("-p", "--port", dest="port", help="Incoming port for ARDrones", metavar="PORT", default="14550")
+parser.add_option("-l", "--local", dest="local", help="Local Host Address", metavar="HOST", default="127.0.0.1")
+parser.add_option("-v", "--verbose", dest="verbose", type="int", help="Verbose Level", metavar="VERBOSE", default=0)
+parser.add_option("-t", "--test", action="store_true", dest="test", help="Test SDK", metavar="TEST", default=False)
+parser.add_option("-q", "--qgc", action="store_true", dest="qgc", help="Route to QGC", metavar="QGC", default=False)
+(options, args) = parser.parse_args()
+
 if __name__ == "__main__":
     drones = load_file(options.file)
     proxies = list()
-    for name, data in drones.iteritems():
+    for key, data in drones.iteritems():
         if options.verbose > 0:
-            print("%s with IP:%s mapped from port %d to port %d" % (name, data["ip"], data["in_port"], data["out_port"]))
-        proxies.append(ARProxyConnection(name=name, ip=data["ip"], port=data["in_port"],
-                                         host=(options.local, data["out_port"]),
+            print("[AR2MAV]%s with IP:%s mapped from port %d to port %d" % (
+                key, data["ip"], data["in_port"], data["out_port"]))
+        proxies.append(ARProxyConnection(name=key, ip=data["ip"], in_port=data["in_port"],
+                                         destination=(options.local, data["out_port"]),
                                          verbose=options.verbose, qgc=options.qgc))
-        t = threading.Thread(name="Thread-" + name, target=proxies[-1].start)
+        t = threading.Thread(name="Thread-" + key, target=proxies[-1].start)
         t.setDaemon(True)
         t.start()
