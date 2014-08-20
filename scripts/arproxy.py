@@ -414,12 +414,12 @@ def load_file(path):
 
 
 parser = OptionParser()
-parser.add_option("-f", "--file", dest="file", help="Csv file with mapping", metavar="FILE", default="../map.csv")
+parser.add_option("-f", "--file", dest="file", help="File with mapping of drone names,ips,ports", metavar="FILE",
+                  default="../map.csv")
 parser.add_option("-p", "--port", dest="port", help="Incoming port for ARDrones", metavar="PORT", default="14550")
 parser.add_option("-l", "--local", dest="local", help="Local Host Address", metavar="HOST", default="127.0.0.1")
 parser.add_option("-v", "--verbose", dest="verbose", type="int", help="Verbose Level", metavar="VERBOSE", default=0)
-parser.add_option("-t", "--test", action="store_true", dest="test", help="Test SDK", metavar="TEST", default=False)
-parser.add_option("-q", "--qgc", action="store_true", dest="qgc", help="Route to QGC", metavar="QGC", default=False)
+parser.add_option("-q", "--qgc", action="store_true", dest="qgc", help="Route to QGC?", metavar="QGC", default=False)
 (options, args) = parser.parse_args()
 
 if __name__ == "__main__":
