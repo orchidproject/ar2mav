@@ -36,3 +36,12 @@ For enabling the connection of multiple drones several steps are required:
 This should have your drone set up for connection. If you want a one time connection just do`./autoconnect.sh &`, if you want this script to be run on boot up of the drone you have to edit the file /bin/wifi_setup.sh on the drone and add the following line at the bottom:
 
 `/home/default/wifi/autoconnect.sh &`
+
+Contributors
+============
+Alexander Botev
+
+Luke Teacy
+
+License
+=======
