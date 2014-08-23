@@ -1,4 +1,5 @@
-## AR2MAV 
+AR2MAV 
+======
 
 AR2MAV - A python based module for interfacing a Parrot's ARDrone 2.0 trough the full capabilities of MAVLink. The module sanitises the manual commands and RC channels of ARDrone 2.0 to hide them and present the drone fully as a MAVLink UAV. Also this allows multiple ARDrones to be connected to a network for Swarm control.
 The module was developed as part of the MOSAIC project.
@@ -7,7 +8,8 @@ The module was developed as part of the MOSAIC project.
 * MAVlink official website - http://qgroundcontrol.org/mavlink/start
 * MOSAIC Project official website - http://mosaicproject.info/research.php
 
-### Installation ###
+Installation
+============
 1. Install git 1.8.3+ [Easy way to do this](http://linuxg.net/how-to-install-git-1-8-4-on-ubuntu-14-0413-1013-0412-1012-04-linux-mint-16151413-pear-os-87-and-elementary-os-0-2/)
 2. Clone repository and change directory to the repo (cd ar2mav)
 3. git submodule init
@@ -18,10 +20,8 @@ The module was developed as part of the MOSAIC project.
 8. python setup.py install
 9. Installation is complete with a stable version of MAVLink
 
-### Multiple Drones 
-
-For enabling the connection of multiple drones several steps are required:
-
+Multiple Drones 
+===============
 1. Open autoconnect.sh and adjust the options for your spesific infrastructure network
 2. Connect with your computer the network emitted by the drone
 2. telnet 192.168.1.1
