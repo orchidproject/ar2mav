@@ -1,4 +1,4 @@
-Copyright (c) 2014, Aleksandar Botev, Luke Teacy
+Copyright (c) 2014, University of Southampton
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
