@@ -62,6 +62,8 @@ class ARProxyConnection:
         self.host = destination
         self.nav_data_port = nav_data_port
         self.connection = None
+        self.target_system = 255
+        self.target_component = 0
         self.sdk = None
         self.alive = False
 
@@ -145,6 +147,8 @@ class ARProxyConnection:
             # print self.name, " from ", self.connection.source_system
             if self.verbose > 0:
                 print str(self.name) + ": Heartbeat (" + str(msg.base_mode) + "," + str(msg.custom_mode) + ")"
+            self.target_system = msg.get_srcSystem()
+            self.target_component = msg.get_srcComponent()
             self.base_mode = msg.base_mode
             # print msg.base_mode
             if self.emergency:
@@ -262,7 +266,10 @@ class ARProxyConnection:
             # print msg,":",self.drone
             # print msg._msgbuf
             # print self.name, ":" , self.drone
-            self.connection.port.sendto(msg._msgbuf, self.drone)
+            if hasattr(msg, 'target_system'):
+                msg.target_system = self.target_system
+                msg.target_component = self.target_component
+            self.connection.port.sendto(msg.pack(self.connection.mav), self.drone)
 
     def send_manual_command(self, msg):
         if msg.get_type() == "COMMAND_LONG":

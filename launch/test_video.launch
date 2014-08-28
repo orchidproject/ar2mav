@@ -1,11 +1,14 @@
 <launch>
-   <node pkg="ar2mav" type="drone_video" name="drone_video" respawn="false" output="screen">
+  <rosparam file="$(find ar2mav)/drones.yaml" command="load" />
+
+  <node pkg="ar2mav" type="drone_video" name="drone_video" respawn="false" output="screen">
 	<param name="drone_ip" value="192.168.1.1" />
 	<param name="drone_port" value="5555" />
 	<param name="buffer_size" value="1048576" />
 	<param name="timeout" value="1" />
-	<param name="topic_name" value="/image/x264" />
+	<param name="name" value="Iago" />
    </node>
-   <node pkg="image_transport" type="republish" name="publisher" args="in:=/image x264 out:=/republished/image" />
+   <node pkg="image_transport" type="republish" name="publisher" args="in:=/Iago/video x264 out:=/republished/image" />
    <node pkg="image_view" type="image_view" name="viewer" args="image:=/republished/image compressed"/>
+   <node pkg="rosbag" type="record" name="rosbag_record" args="-a" />
 </launch>

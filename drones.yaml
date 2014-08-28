@@ -1,9 +1,9 @@
 drones: {
-'Parrot': {ip: '192.168.1.1', in_port: 57001, out_port: 58001},
-'Polly': {ip: '192.168.10.151', in_port: 57151, out_port: 58151},
-'Charlie': {ip: '192.168.10.152', in_port: 57152, out_port: 58152},
-'Tweety': {ip: '192.168.10.153', in_port: 57153, out_port: 58153},
-'Kevin': {ip: '192.168.10.154', in_port: 57154, out_port: 58154},
-'Iago': {ip: '192.168.10.155', in_port: 57155, out_port: 58155}
+'Parrot': {ip: '192.168.1.1', in_port: 57001, out_port: 58001, video_port: 5555},
+'Polly': {ip: '192.168.10.151', in_port: 57151, out_port: 58151, video_port: 5556},
+'Charlie': {ip: '192.168.10.152', in_port: 57152, out_port: 58152, video_port: 5557},
+'Tweety': {ip: '192.168.10.153', in_port: 57153, out_port: 58153, video_port: 5558},
+'Kevin': {ip: '192.168.10.154', in_port: 57154, out_port: 58154, video_port: 5559},
+'Iago': {ip: '192.168.10.155', in_port: 57155, out_port: 58155, video_port: 5560}
 }
-drones_active: ['Tweety', 'Iago']
+drones_active: ['Iago', 'Tweety']
