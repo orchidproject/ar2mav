@@ -54,7 +54,7 @@ class ARProxyConnection:
     # 1 - Only information about manual control is printed
     # 2 - Manual Control Information + some extra
     # 3 - All incoming data is printed - detailed messages
-    def __init__(self, name, ip, in_port, destination, nav_data_port, verbose=0, repeat=1, qgc=False):
+    def __init__(self, name, ip, in_port, destination, nav_data_port, timeout=10, verbose=0, repeat=1, qgc=False):
         self.drone = (ip, PORTS["MAVLINK"])
         self.name = name
         self.ip = ip
@@ -62,10 +62,11 @@ class ARProxyConnection:
         self.host = destination
         self.nav_data_port = nav_data_port
         self.connection = None
-        self.target_system = 255
-        self.target_component = 0
+        self.target_system = None
+        self.target_component = None
         self.sdk = None
         self.alive = False
+        self.timeout = timeout
 
         self.manual = -1
         self.emergency = False
@@ -95,16 +96,25 @@ class ARProxyConnection:
         self.connection = mavutil.mavlink_connection(self.host[0] + ":" + str(self.port))
         self.sdk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sdk.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        for i in range(PING_TIMES):
-            self.connection.port.sendto(
-                mavutil.mavlink.MAVLink_ping_message(time.time() * 1E6, 1, 0, 0).pack(self.connection.mav), self.drone)
-            time.sleep(PING_TIMEOUT)
-        print("[AR2MAV]%s: Waiting Heartbeat" % self.name)
-        self.connection.wait_heartbeat()
+        #for i in range(PING_TIMES):
+        #    self.connection.port.sendto(
+        #        mavutil.mavlink.MAVLink_ping_message(time.time() * 1E6, 1, 0, 0).pack(self.connection.mav), self.drone)
+        #    time.sleep(PING_TIMEOUT)
+        #print("[AR2MAV]%s: Waiting Heartbeat" % self.name)
+        #self.connection.wait_heartbeat()
         self.sdk.bind((self.host[0], self.nav_data_port))
         self.sdk.setblocking(0)
         self.alive = True
         while self.alive:
+            while not self.target_system:
+                print("[AR2MAV]%s: Waiting Heartbeat" % self.name)
+                for i in range(PING_TIMES):
+                    self.connection.port.sendto(
+                        mavutil.mavlink.MAVLink_ping_message(time.time() * 1E6, 1, 0, 0).pack(self.connection.mav), self.drone)
+                    time.sleep(PING_TIMEOUT)
+                msg = self.connection.recv_match(type="HEARTBEAT", blocking=False, timeout=self.timeout)
+                if msg:
+                    self.process_from_drone(msg)
             # Receive MAVLink messages
             msg = self.connection.recv_match(blocking=False)
             if msg:
@@ -121,6 +131,8 @@ class ARProxyConnection:
                     self.process_from_host(msg)
                 else:
                     self.process_from_drone(msg)
+            if time.clock() - self.mav_last > self.timeout:
+                self.target_system = None
             # Receive SDK messages
             try:
                 packet, address = self.sdk.recvfrom(65535)
