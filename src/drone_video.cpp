@@ -8,6 +8,51 @@
  * Receives ArDrone 2.0 video stream and publishes it on x264_image_transport
  */
 
+typedef struct { //PaVE
+    char signiture[4]; // "PaVE" - used to identify the start of frame
+    uint8_t version; // Version code
+    uint8_t video_codec; // Codec of the following frame
+    uint16_t header_size; // Size of the parrot_video_encapsulation_t
+    uint32_t payload_size; // Amount of data following this PaVE
+    uint16_t encoded_stream_width; // ex: 640
+    uint16_t encoded_stream_height; // ex: 368
+    uint16_t display_width; // ex: 640
+    uint16_t display_height; // ex: 360
+    uint32_t frame_number; // Frame position inside the current stream
+    uint32_t timestamp; // In milliseconds
+    uint8_t total_chuncks; // Number of UDP packets containing the current decodable payload - currently unused
+    uint8_t chunck_index; // Position of the packet - first chunk is #0 - currenty unused
+    uint8_t frame_type; // I-frame, P-frame - parrot_video_encapsulation_frametypes_t
+    uint8_t control; // Special commands like end-of-stream or advertised frames
+    uint32_t stream_byte_position_lw; // Byte position of the current payload in the encoded stream - lower 32-bit word
+    uint32_t stream_byte_position_uw; // Byte position of the current payload in the encoded stream - upper 32-bit word
+    uint16_t stream_id; // This ID indentifies packets that should be recorded together
+    uint8_t total_slices; // number of slices composing the current frame
+    uint8_t slice_index; // position of the current slice in the frame
+    uint8_t header1_size; // H.264 only : size of SPS inside payload - no SPS present if value is zero
+    uint8_t header2_size; // H.264 only : size of PPS inside payload - no PPS present if value is zero
+    uint8_t reserved2[2]; // Padding to align on 48 bytes
+    uint32_t advertised_size; // Size of frames announced as advertised frames
+    uint8_t reserved3[12]; // Padding to align on 64 bytes
+    uint8_t reserved4[4]; // padding -- added b/c it was in the KIPR library code
+} __attribute__ ((packed)) parrot_video_encapsulation_t;
+
+typedef enum {
+    //PaVE codec IDs
+    CODEC_UNKNNOWN = 0,
+    CODEC_VLIB,
+    CODEC_P264,
+    CODEC_MPEG4_VISUAL,
+    CODEC_MPEG4_AVC
+} parrot_video_encapsulation_codecs_t;
+
+typedef enum {
+	//PaVE frame types
+    FRAME_TYPE_UNKNNOWN = 0, FRAME_TYPE_IDR_FRAME, // headers followed by I-frame
+    FRAME_TYPE_I_FRAME, FRAME_TYPE_P_FRAME, FRAME_TYPE_HEADERS
+} parrot_video_encapsulation_frametypes_t;
+
+
 const int one = 1;
 
 int establish_socket(const std::string* name, sockaddr_in* myAddr, sockaddr_in* droneAddr, const struct timeval* timeout){
@@ -16,7 +61,7 @@ int establish_socket(const std::string* name, sockaddr_in* myAddr, sockaddr_in* 
 	//***************************************************************************
 
 	int socketNumber = socket(AF_INET, SOCK_STREAM, 0);
-	while(ros::ok() && !flag && connect(socketNumber, (sockaddr*) droneAddr, sizeof(sockaddr_in)) != 0) {
+	while(ros::ok() && connect(socketNumber, (sockaddr*) droneAddr, sizeof(sockaddr_in)) != 0) {
 		ROS_INFO("[%s]Did not manage to establish connection", (*name).c_str());
 		ros::Duration((*timeout).tv_sec + (*timeout).tv_usec / 1000000.0).sleep();
 	}
@@ -54,6 +99,7 @@ int fetch_video(ros::NodeHandle nh, std::string drone_ip, int drone_port,
 	int partLength;
 	bool check;
 	x264_image_transport::x264Packet message;
+	parrot_video_encapsulation_t* pave;
 	index = 0;
 	int errorCount = 0;
 	//***************************************************************************
@@ -65,11 +111,11 @@ int fetch_video(ros::NodeHandle nh, std::string drone_ip, int drone_port,
 	//   Decode PaVE packet and send the encoded video stream
 	//***************************************************************************
 	ROS_INFO("[%s]***** START VIDEO STREAM *****", name.c_str());
-	while (ros::ok() && !flag) {
+	while (ros::ok()) {
 		if(index == 0) {
 			partLength = TEMP_FAILURE_RETRY(recv(socketNumber, part, buffer_size,0));
 			if (partLength <= 0) {
-				ROS_INFO("[%s][%d]Did not receive video data, trying to recover", name.c_str(), errorCount);
+				ROS_INFO("[%s][%d]Did not receive video data, trying to recover", name.c_str(), partLength);
 				if(errorCount > 5){
 					close(socketNumber);
 					ros::Duration(timeout.tv_sec + timeout.tv_usec / 1000000.0).sleep();
@@ -81,7 +127,9 @@ int fetch_video(ros::NodeHandle nh, std::string drone_ip, int drone_port,
 			}
 			errorCount = 0;
 		}
-		if (strncmp((const char*) (part+index),"PaVE", 4) != 0) {
+		pave = (parrot_video_encapsulation_t *) (part+index);
+		//ROS_INFO("Codec: %d",pave->video_codec);
+		if (strncmp(pave->signiture,"PaVE", 4) != 0) {
 			ROS_INFO("[%s]PaVE not synchronized, trying to rebind", name.c_str());
 			for(i = 0;i<buffer_size-index-3;i++)
 				if(strncmp((const char*) (part+index+i),"PaVE", 4) == 0){
@@ -97,6 +145,8 @@ int fetch_video(ros::NodeHandle nh, std::string drone_ip, int drone_port,
 		message.img_width = *(const uint16_t*) (part + index + 16);
 		message.img_height = *(const uint16_t*) (part + index + 18);
 		message.header.stamp.fromSec(*(const uint32_t*) (part + index + 24) / 1000.0);
+		message.codec = pave->video_codec == 4 ? x264_image_transport::x264Packet::CODEC_H264 : 
+				pave->video_codec == 3 ? x264_image_transport::x264Packet::CODEC_MPEG4 : -1;
 		if(index + *header_size + *payload_size > buffer_size){
 			ROS_INFO("[%s]Too big payload, skipping frame.(ADVICE: Increase buffer_size)", name.c_str());
 			index = 0;
@@ -173,49 +223,3 @@ int main(int argc, char **argv)
 	return fetch_video(nh, drone_ip, drone_port, buffer_size, timeout, name);
 }
 
-/*
-typedef struct { //PaVE
-    uint8_t signature[4]; // "PaVE" - used to identify the start of frame
-    uint8_t version; // Version code
-    uint8_t video_codec; // Codec of the following frame
-    uint16_t header_size; // Size of the parrot_video_encapsulation_t
-    uint32_t payload_size; // Amount of data following this PaVE
-    uint16_t encoded_stream_width; // ex: 640
-    uint16_t encoded_stream_height; // ex: 368
-    uint16_t display_width; // ex: 640
-    uint16_t display_height; // ex: 360
-    uint32_t frame_number; // Frame position inside the current stream
-    uint32_t timestamp; // In milliseconds
-    uint8_t total_chuncks; // Number of UDP packets containing the current decodable payload - currently unused
-    uint8_t chunck_index; // Position of the packet - first chunk is #0 - currenty unused
-    uint8_t frame_type; // I-frame, P-frame - parrot_video_encapsulation_frametypes_t
-    uint8_t control; // Special commands like end-of-stream or advertised frames
-    uint32_t stream_byte_position_lw; // Byte position of the current payload in the encoded stream - lower 32-bit word
-    uint32_t stream_byte_position_uw; // Byte position of the current payload in the encoded stream - upper 32-bit word
-    uint16_t stream_id; // This ID indentifies packets that should be recorded together
-    uint8_t total_slices; // number of slices composing the current frame
-    uint8_t slice_index; // position of the current slice in the frame
-    uint8_t header1_size; // H.264 only : size of SPS inside payload - no SPS present if value is zero
-    uint8_t header2_size; // H.264 only : size of PPS inside payload - no PPS present if value is zero
-    uint8_t reserved2[2]; // Padding to align on 48 bytes
-    uint32_t advertised_size; // Size of frames announced as advertised frames
-    uint8_t reserved3[12]; // Padding to align on 64 bytes
-    uint8_t reserved4[4]; // padding -- added b/c it was in the KIPR library code
-} __attribute__ ((packed)) parrot_video_encapsulation_t;
-
-typedef enum {
-    //PaVE codec IDs
-    CODEC_UNKNNOWN = 0,
-    CODEC_VLIB,
-    CODEC_P264,
-    CODEC_MPEG4_VISUAL,
-    CODEC_MPEG4_AVC
-} parrot_video_encapsulation_codecs_t;
-
-typedef enum {
-	//PaVE frame types
-    FRAME_TYPE_UNKNNOWN = 0, FRAME_TYPE_IDR_FRAME, // headers followed by I-frame
-    FRAME_TYPE_I_FRAME, FRAME_TYPE_P_FRAME, FRAME_TYPE_HEADERS
-} parrot_video_encapsulation_frametypes_t;
-
-*/

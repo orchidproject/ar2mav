@@ -89,7 +89,7 @@ class ARProxyConnection:
         self.status = None
         self.mission_seq = 1
         self.camera_value = 1.0
-        self.relative_alt = 0.0
+        self.relative_alt = 0.24
 
     def start(self):
         print("[AR2MAV]%s: ADDRESS: %s" %(self.name, str(self.drone)))
@@ -166,7 +166,7 @@ class ARProxyConnection:
             if self.emergency:
                 self.custom_mode = 100
                 msg.custom_mode = 100
-            elif self.relative_alt == 0.0:
+            elif self.relative_alt < 0.25:
                 self.custom_mode = 9
                 msg.custom_mode = 9
                 # #print msg._msgbuf
@@ -211,6 +211,7 @@ class ARProxyConnection:
             elif time.clock() - self.mav_last > self.mav_interval:
                 if self.verbose > 0:
                     print("[AR2MAV]%s: Make MAVLink" % self.name)
+                    #print data
                 # print data["DEMO"]["CONTROL_STATE"], " ", data["DEMO"]["FLY_STATE"]
                 if self.emergency:
                     self.custom_mode = 100
@@ -237,11 +238,15 @@ class ARProxyConnection:
             else:
                 if self.verbose > 0:
                     print("[AR2MAV]%s: NAVDATA DEMO GONE WRONG" % self.name)
+                    #print data
                 self.invoke_sdk(SDK_NAVDATA_COMMAND)
                 self.invoke_sdk(SDK_NAVDATA_OPTIONS)
                 self.invoke_sdk(SDK_ACK)
 
     def process_from_host(self, msg):
+        #if msg.get_type() != "HEARTBEAT":
+        #    print "AR2MAV*****************"
+        #    print msg
         if self.verbose > 2:
             print_msg("From Ground(%s[%d]):" % (self.name, self.manual), msg)
         if self.manual == -1:
@@ -249,7 +254,7 @@ class ARProxyConnection:
                 print("[AR2MAV]%s: No drone" % self.name)
             return
         elif msg.get_type() == "SET_MODE":
-            # print msg.base_mode, " ", msg.custom_mode
+            print "[AR2MAV]%sMODE:(%d,%d)" % (self.name, msg.base_mode,  msg.custom_mode)
             if msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED > 0:
                 if msg.custom_mode == 99:
                     self.manual = 1
