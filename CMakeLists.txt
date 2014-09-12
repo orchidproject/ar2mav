@@ -105,7 +105,7 @@ include_directories(
 ## Declare a cpp executable
 # add_executable(ar2mav_node src/ar2mav_node.cpp)
 add_executable(drone_video src/drone_video.cpp)
-
+add_executable(ardrone2_driver src/ardrone2_driver.cpp)
 ## Add cmake target dependencies of the executable/library
 ## as an example, message headers may need to be generated before nodes
 # add_dependencies(ar2mav_node ar2mav_generate_messages_cpp)
@@ -115,6 +115,9 @@ target_link_libraries(drone_video
   ${catkin_LIBRARIES}
 )
 
+target_link_libraries(ardrone2_driver
+  ${catkin_LIBRARIES}
+)
 #############
 ## Install ##
 #############
