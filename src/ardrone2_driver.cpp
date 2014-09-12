@@ -1,7 +1,9 @@
-#include<ros/ros.h>
-#include<nodelet/nodelet.h>
-#include<boost/thread.hpp>
-#include<image_transport/image_transport.h>
+#include <ros/ros.h>
+#include <nodelet/nodelet.h>
+#include <boost/thread.hpp>
+#include <image_transport/image_transport.h>
+#include <image_transport/publisher_plugin.h>
+#include <pluginlib/class_loader.h>
 
 class ARDrone2Driver{
 
@@ -9,7 +11,8 @@ private:
     sensor_msgs::CameraInfo bottom_camera;
     sensor_msgs::CameraInfo front_camera;
     std::string name;
-    image_transport::Publisher image_pub;
+    boost::shared_ptr<image_transport::PublisherPlugin> image_pub;
+    image_transport::Subscriber image_sub;
     ros::Publisher info_pub;
 
     sensor_msgs::CameraInfo loadCameraInfo(const ros::NodeHandle& nh, const std::string prefix){
@@ -17,7 +20,6 @@ private:
         int temp;
         std::string str_temp;
         std::vector<double> vec_temp;
-
         nh.param<int>(prefix + "/height", temp, 360);
         camera.height = temp;
         nh.param<int>(prefix + "/width", temp, 640);
@@ -26,7 +28,7 @@ private:
         camera.distortion_model = str_temp;
         nh.param<std::vector<double> >(prefix + "/D", vec_temp, std::vector<double>(5,0));
         for(int i=0;i<vec_temp.size();i++)
-            camera.D[i] = vec_temp[i];
+            camera.D.push_back(vec_temp[i]);
         nh.param<std::vector<double> >(prefix + "/K", vec_temp, std::vector<double>(9,0));
         for(int i=0;i<vec_temp.size();i++)
             camera.K[i] = vec_temp[i];
@@ -57,18 +59,26 @@ public:
     void republish_callback(const sensor_msgs::ImageConstPtr& msg){
         this->bottom_camera.header.stamp = ros::Time::now();
         this->info_pub.publish(this->bottom_camera);
-        this->image_pub.publish(msg);
+        this->image_pub->publish(msg);
     }
 
-    ARDrone2Driver(std::string name){
+    ARDrone2Driver(std::string name, std::string in_transport, std::string out_transport){
         this->name = name;
         ros::NodeHandle nh("~");
-        bottom_camera = this->loadCameraInfo(nh,"/bttom_camera");
-        front_camera = this->loadCameraInfo(nh,"/front_camera");
-        image_transport::ImageTransport it(nh);
-        this->image_pub = it.advertise("/" + name + "/video/image_raw",1);
+        bottom_camera = this->loadCameraInfo(nh,name + "/bottom_camera");
+        front_camera = this->loadCameraInfo(nh,name + "/front_camera");
+        ROS_INFO("Loaded camera info's complete %s", in_transport.c_str());
         this->info_pub = nh.advertise<sensor_msgs::CameraInfo>("/" + name + "/video/camera_info",5);
-        image_transport::Subscriber sub = it.subscribe("/" + name + "/video", 1, &ARDrone2Driver::republish_callback, this);
+
+        image_transport::ImageTransport it(nh);
+        std::string in_topic = "/" + name + "/video";
+        std::string out_topic = "/" + name + "/video/image_raw";
+        pluginlib::ClassLoader<image_transport::PublisherPlugin> loader("image_transport", "image_transport::PublisherPlugin");
+        std::string lookup_name = image_transport::PublisherPlugin::getLookupName(out_transport);
+        this->image_pub = loader.createInstance(lookup_name);
+        this->image_pub->advertise(nh, out_topic, 1, image_transport::SubscriberStatusCallback(),
+                           image_transport::SubscriberStatusCallback(), ros::VoidPtr(), false);
+        this->image_sub = it.subscribe(in_topic, 1, &ARDrone2Driver::republish_callback, this, in_transport);
     }
 
     ~ARDrone2Driver(){}
@@ -77,9 +87,13 @@ public:
 int main(int argc, char **argv){
     ros::init(argc, argv, "ardrone2_driver");
     ros::NodeHandle nh("~");
-    std::string name;
+    std::string name, in_transport, out_transport;
     nh.param<std::string>("name", name, "drone");
-    ARDrone2Driver driver = ARDrone2Driver(name);
+    nh.param<std::string>("in_transport", in_transport, "x264");
+    nh.param<std::string>("in_transport", out_transport, "raw");
+    ARDrone2Driver driver =  ARDrone2Driver(name,in_transport, out_transport);
+    ROS_INFO("Starting ArDrone2.0 Driver node...");
+    ros::spin();
 }
 
 	

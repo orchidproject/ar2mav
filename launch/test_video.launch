@@ -1,9 +1,13 @@
 <launch>
   <rosparam file="$(find ar2mav)/drones.yaml" command="load" />
+  <rosparam file="$(find ar2mav)/tweety_camera.yaml" command="load" ns="Parrot" />
   <node pkg="ar2mav" type="drone_video" name="video_Parrot" respawn="false" output="screen">
 	<param name="name" value="Parrot" />
   </node>
-  <node pkg="image_transport" type="republish" name="publisher" output="screen" args="x264 in:=/Parrot/video compressed out:=/republished/image" />
+  <node pkg="ar2mav" type="ardrone2_driver" name="ardrone2_driver" respawn="false" output="screen">
+	<param name="name" value="Parrot" />
+  </node>
+  
   <node pkg="rqt_image_view" type="rqt_image_view" name="image_view" output="screen" />
 </launch>
 

@@ -52,6 +52,34 @@ typedef enum {
     FRAME_TYPE_I_FRAME, FRAME_TYPE_P_FRAME, FRAME_TYPE_HEADERS
 } parrot_video_encapsulation_frametypes_t;
 
+void printPaVE(parrot_video_encapsulation_t* PaVE) {
+        printf("\n---------------------------\n");
+
+        printf("Codec : %s\n",
+                        (PaVE->video_codec == CODEC_MPEG4_VISUAL) ?
+                                        "MP4" :
+                                        ((PaVE->video_codec == CODEC_MPEG4_AVC) ? "H264" : "Unknown"));
+
+        printf("StreamID : %d \n", PaVE->stream_id);
+        printf("Timestamp : %d ms\n", PaVE->timestamp);
+        printf("Encoded dims : %d x %d\n", PaVE->encoded_stream_width,
+                        PaVE->encoded_stream_height);
+        printf("Display dims : %d x %d\n", PaVE->display_width, PaVE->display_height);
+        ////printf ("Header size  : %d (PaVE size : %d)\n", PaVE->header_size, sizeof (parrot_video_encapsulation_t));
+        printf("Header size : %d\n", PaVE->header_size);
+        printf("Payload size : %d\n", PaVE->payload_size);
+        printf("Size of SPS inside payload : %d\n", PaVE->header1_size);
+        printf("Size of PPS inside payload : %d\n", PaVE->header2_size);
+        printf("Slices in the frame : %d\n", PaVE->total_slices);
+        printf("Frame Type / Number : %s : %d : slide %d/%d\n",
+                        (PaVE->frame_type == FRAME_TYPE_P_FRAME) ?
+                                        "P-Frame" :
+                                        ((PaVE->frame_type == FRAME_TYPE_I_FRAME) ?
+                                                        "I-Frame" : "IDR-Frame"), PaVE->frame_number,
+                        PaVE->slice_index + 1, PaVE->total_slices);
+
+        printf("---------------------------\n\n");
+}
 
 const int one = 1;
 
@@ -128,6 +156,7 @@ int fetch_video(ros::NodeHandle nh, std::string drone_ip, int drone_port,
 			errorCount = 0;
 		}
 		pave = (parrot_video_encapsulation_t *) (part+index);
+        printPaVE(pave);
 		//ROS_INFO("Codec: %d",pave->video_codec);
 		if (strncmp(pave->signiture,"PaVE", 4) != 0) {
 			ROS_INFO("[%s]PaVE not synchronized, trying to rebind", name.c_str());
