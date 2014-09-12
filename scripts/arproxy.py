@@ -25,6 +25,7 @@ SDK_EMERGENCY = 4
 SDK_NAVDATA_REQUEST = 10
 SDK_NAVDATA_COMMAND = 11
 SDK_NAVDATA_OPTIONS = 12
+SDK_NAVDATA_CORRECTION = 13
 PING_TIMES = 5
 PING_TIMEOUT = 1
 
@@ -241,6 +242,7 @@ class ARProxyConnection:
                     #print data
                 self.invoke_sdk(SDK_NAVDATA_COMMAND)
                 self.invoke_sdk(SDK_NAVDATA_OPTIONS)
+                self.invoke_sdk(SDK_NAVDATA_CORRECTION)
                 self.invoke_sdk(SDK_ACK)
 
     def process_from_host(self, msg):
@@ -318,6 +320,8 @@ class ARProxyConnection:
             return
         elif command == SDK_NAVDATA_COMMAND:
             msg = "AT*CONFIG={},\"general:navdata_demo\",\"TRUE\"\r"
+        elif command == SDK_NAVDATA_CORRECTION:
+            msg = "AT*CONFIG={},\"general:video_enable\",\"TRUE\"\r"
         elif command == SDK_NAVDATA_OPTIONS:
             msg = "AT*CONFIG={},\"general:navdata_options\",\"%d\"\r" % NAVDATA_OPTIONS
         elif command == SDK_COMMAND:
