@@ -1,3 +1,4 @@
+#include <ar2mav/ar2mav.h>
 #include <ros/ros.h>
 #include <nodelet/nodelet.h>
 #include <boost/thread.hpp>
@@ -5,17 +6,7 @@
 #include <image_transport/publisher_plugin.h>
 #include <pluginlib/class_loader.h>
 
-class ARDrone2Driver{
-
-private:
-    sensor_msgs::CameraInfo bottom_camera;
-    sensor_msgs::CameraInfo front_camera;
-    std::string name;
-    boost::shared_ptr<image_transport::PublisherPlugin> image_pub;
-    image_transport::Subscriber image_sub;
-    ros::Publisher info_pub;
-
-    sensor_msgs::CameraInfo loadCameraInfo(const ros::NodeHandle& nh, const std::string prefix){
+sensor_msgs::CameraInfo loadCameraInfo(const ros::NodeHandle& nh, const std::string prefix){
         sensor_msgs::CameraInfo camera = sensor_msgs::CameraInfo();
         int temp;
         std::string str_temp;
@@ -52,48 +43,36 @@ private:
         camera.roi.width = temp;
         nh.param<int>(prefix + "/roi/do_rectify", temp, 0);
         camera.roi.do_rectify = temp == 0 ? 0 : 1;
+        camera.header.frame_id = prefix + "/bottom_camera";
+        //ROS_INFO("%s,%f,%f,%f,%f,%f" ,prefix.c_str(), camera.D[0],camera.D[1],camera.D[2],camera.D[3],camera.D[4]);
         return camera;
     }
 
-public:
-    void republish_callback(const sensor_msgs::ImageConstPtr& msg){
-        this->bottom_camera.header.stamp = ros::Time::now();
-        this->info_pub.publish(this->bottom_camera);
-        this->image_pub->publish(msg);
-    }
+namespace ar2mav{
 
-    ARDrone2Driver(std::string name, std::string in_transport, std::string out_transport){
-        this->name = name;
-        ros::NodeHandle nh("~");
-        bottom_camera = this->loadCameraInfo(nh,name + "/bottom_camera");
-        front_camera = this->loadCameraInfo(nh,name + "/front_camera");
-        ROS_INFO("Loaded camera info's complete %s", in_transport.c_str());
-        this->info_pub = nh.advertise<sensor_msgs::CameraInfo>("/" + name + "/video/camera_info",5);
 
-        image_transport::ImageTransport it(nh);
-        std::string in_topic = "/" + name + "/video";
-        std::string out_topic = "/" + name + "/video/image_raw";
-        pluginlib::ClassLoader<image_transport::PublisherPlugin> loader("image_transport", "image_transport::PublisherPlugin");
-        std::string lookup_name = image_transport::PublisherPlugin::getLookupName(out_transport);
-        this->image_pub = loader.createInstance(lookup_name);
-        this->image_pub->advertise(nh, out_topic, 1, image_transport::SubscriberStatusCallback(),
-                           image_transport::SubscriberStatusCallback(), ros::VoidPtr(), false);
-        this->image_sub = it.subscribe(in_topic, 1, &ARDrone2Driver::republish_callback, this, in_transport);
-    }
+    void ARDroneDriver::republish_callback(const sensor_msgs::ImageConstPtr& msg){
+            this->bottom_camera.header.stamp = msg->header.stamp;
+            this->info_pub.publish(this->bottom_camera);
+            this->image_pub->publish(msg);
+        }
 
-    ~ARDrone2Driver(){}
-};
-
-int main(int argc, char **argv){
-    ros::init(argc, argv, "ardrone2_driver");
-    ros::NodeHandle nh("~");
-    std::string name, in_transport, out_transport;
-    nh.param<std::string>("name", name, "drone");
-    nh.param<std::string>("in_transport", in_transport, "x264");
-    nh.param<std::string>("in_transport", out_transport, "raw");
-    ARDrone2Driver driver =  ARDrone2Driver(name,in_transport, out_transport);
-    ROS_INFO("Starting ArDrone2.0 Driver node...");
-    ros::spin();
+    ARDroneDriver::ARDroneDriver(ros::NodeHandle nh, std::string name, std::string in_transport, std::string out_transport){
+            this->name = name;
+            this->bottom_camera = loadCameraInfo(nh,"/" + name + "/bottom_camera");
+            this->front_camera = loadCameraInfo(nh,"/" + name + "/front_camera");
+            ROS_INFO("Loaded camera info's complete %s", in_transport.c_str());
+            this->info_pub = nh.advertise<sensor_msgs::CameraInfo>("/" + name + "/video/camera_info",5);
+            image_transport::ImageTransport it(nh);
+            std::string in_topic = "/" + name + "/video";
+            std::string out_topic = "/" + name + "/video/image_raw";
+            pluginlib::ClassLoader<image_transport::PublisherPlugin> loader("image_transport", "image_transport::PublisherPlugin");
+            std::string lookup_name = image_transport::PublisherPlugin::getLookupName(out_transport);
+            this->image_pub = loader.createInstance(lookup_name);
+            this->image_pub->advertise(nh, out_topic, 1, image_transport::SubscriberStatusCallback(),
+                               image_transport::SubscriberStatusCallback(), ros::VoidPtr(), false);
+            this->image_sub = it.subscribe(in_topic, 1, &ARDroneDriver::republish_callback, this, in_transport);
+        }
 }
 
 	

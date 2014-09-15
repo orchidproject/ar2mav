@@ -1,13 +1,22 @@
 <launch>
   <rosparam file="$(find ar2mav)/drones.yaml" command="load" />
-  <rosparam file="$(find ar2mav)/tweety_camera.yaml" command="load" ns="Parrot" />
-  <node pkg="ar2mav" type="drone_video" name="video_Parrot" respawn="false" output="screen">
+  <rosparam file="$(find ar2mav)/tweety_camera.yaml" command="load" ns="Parrot" /> 
+
+  <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" />
+  <node pkg="nodelet" type="nodelet" name="Parrot_video" args="load ar2mav/ARDroneVideoNodelet nodelet_manager" output="screen" >
 	<param name="name" value="Parrot" />
   </node>
-  <node pkg="ar2mav" type="ardrone2_driver" name="ardrone2_driver" respawn="false" output="screen">
+  <node pkg="nodelet" type="nodelet" name="Parrot_driver" args="load ar2mav/ARDroneDriverNodelet nodelet_manager" output="screen" >
 	<param name="name" value="Parrot" />
   </node>
-  
+  <node pkg="nodelet" type="nodelet" name="debayer" args="load image_proc/debayer nodelet_manager --no-bond" >
+	<remap from="image_raw" to="/Parrot/video/image_raw" />
+  </node>
+  <node pkg="nodelet" type="nodelet" name="rectify_mono" args="load image_proc/rectify nodelet_manager --no-bond" >
+	<remap from="camera_info" to="/Parrot/video/camera_info" />
+        <remap from="image_mono" to="/image_mono" />
+  </node>
+
   <node pkg="rqt_image_view" type="rqt_image_view" name="image_view" output="screen" />
 </launch>
 

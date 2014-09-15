@@ -9,6 +9,7 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   std_msgs
   x264_image_transport
+  nodelet
 )
 
 ## System dependencies are found with CMake's conventions
@@ -82,7 +83,9 @@ find_package(catkin REQUIRED COMPONENTS
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES ar2mav
-  CATKIN_DEPENDS roscpp rospy std_msgs x264_image_transport
+  CATKIN_DEPENDS roscpp rospy std_msgs x264_image_transport nodelet
+  INCLUDE_DIRS include
+  LIBRARIES ${PROJECT_NAME}
 #  DEPENDS system_lib
 )
 
@@ -94,76 +97,32 @@ catkin_package(
 ## Your package locations should be listed before other locations
 # include_directories(include)
 include_directories(
+  include
   ${catkin_INCLUDE_DIRS}
 )
 
-## Declare a cpp library
-# add_library(ar2mav
-#   src/${PROJECT_NAME}/ar2mav.cpp
-# )
-
-## Declare a cpp executable
-# add_executable(ar2mav_node src/ar2mav_node.cpp)
-add_executable(drone_video src/drone_video.cpp)
-add_executable(ardrone2_driver src/ardrone2_driver.cpp)
-## Add cmake target dependencies of the executable/library
-## as an example, message headers may need to be generated before nodes
-# add_dependencies(ar2mav_node ar2mav_generate_messages_cpp)
-
-## Specify libraries to link a library or executable target against
-target_link_libraries(drone_video
-  ${catkin_LIBRARIES}
+# Library
+add_library(${PROJECT_NAME} 
+  src/drone_video.cpp
+  src/ardrone2_driver.cpp
+  src/nodelets.cpp
 )
+target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES} )
+install(TARGETS ${PROJECT_NAME} DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION})  
+install(DIRECTORY include/${PROJECT_NAME}/ DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION})
+install(FILES nodelet_plugins.xml DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
 
-target_link_libraries(ardrone2_driver
-  ${catkin_LIBRARIES}
-)
-#############
-## Install ##
-#############
+# Individual node
+add_executable(video src/video_node.cpp include/ar2mav/ar2mav.h)
+target_link_libraries(video ${PROJECT_NAME})
 
-# all install targets should use catkin DESTINATION variables
-# See http://ros.org/doc/api/catkin/html/adv_user_guide/variables.html
+install(TARGETS video
+	DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+) 
 
-## Mark executable scripts (Python etc.) for installation
-## in contrast to setup.py, you can choose the destination
- install(PROGRAMS
+# Python scripts
+install(PROGRAMS
    scripts/arproxy.py 
    scripts/calibrate.py
    DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
-
-## Mark executables and/or libraries for installation
-# install(TARGETS ar2mav ar2mav_node
-# install(TARGETS
-#    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-#    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-#    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-# )
-
-## Mark cpp header files for installation
-# install(DIRECTORY include/${PROJECT_NAME}/
-#   DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
-#   FILES_MATCHING PATTERN "*.h"
-#   PATTERN ".svn" EXCLUDE
-# )
-
-## Mark other files for installation (e.g. launch and bag files, etc.)
-# install(FILES
-#   # myfile1
-#   # myfile2
-#   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
-# )
-
-#############
-## Testing ##
-#############
-
-## Add gtest based cpp test target and link libraries
-# catkin_add_gtest(${PROJECT_NAME}-test test/test_ar2mav.cpp)
-# if(TARGET ${PROJECT_NAME}-test)
-#   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
-# endif()
-
-## Add folders to be run by python nosetests
-# catkin_add_nosetests(test)

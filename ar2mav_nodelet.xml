@@ -1,0 +1,19 @@
+<library path="lib/libar2mav">
+  <class name="ar2mav/ARDroneVideoNodelet"
+	 type="ar2mav::ARDroneVideoNodelet"
+	 base_class_type="nodelet::Nodelet">
+    <description>
+      Nodelet to fetch x264 encoded video stream from the drone.
+    </description>
+  </class>
+
+  <class name="ar2mav/ARDroneDriverNodelet"
+	 type="ar2mav::ARDroneDriverNodelet"
+	 base_class_type="nodelet::Nodelet">
+    <description>
+      Nodelet to republish a raw image and the camera info.
+    </description>
+  </class>
+
+</library>
+
