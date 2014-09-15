@@ -7,6 +7,8 @@
  * Receives ArDrone 2.0 video stream and publishes it on x264_image_transport
  */
 
+typedef boost::shared_ptr<x264_image_transport::x264Packet> x264PacketPtr;
+
 typedef struct { //PaVE
     char signiture[4]; // "PaVE" - used to identify the start of frame
     uint8_t version; // Version code
@@ -142,12 +144,12 @@ namespace ar2mav{
         //   Helper variables
         //***************************************************************************
         int index, read, result, i;
-        const uint16_t* header_size;
-        const uint32_t* payload_size;
+        //const uint16_t* header_size;
+        //const uint32_t* pave->payload_size;
         unsigned char part[buffer_size];
         int partLength;
         bool check;
-        x264_image_transport::x264Packet message;
+        x264PacketPtr message;
         parrot_video_encapsulation_t* pave;
         index = 0;
         int errorCount = 0;
@@ -189,24 +191,25 @@ namespace ar2mav{
                     index = 0;
                 continue;
             }
-            header_size = (const uint16_t*) (part + index + 6);
-            payload_size = (const uint32_t*) (part + index + 8);
-            message.img_width = *(const uint16_t*) (part + index + 16);
-            message.img_height = *(const uint16_t*) (part + index + 18);
-            message.header.stamp.fromSec(*(const uint32_t*) (part + index + 24) / 1000.0);
-            message.codec = pave->video_codec == 4 ? x264_image_transport::x264Packet::CODEC_H264 :
+            //header_size = (const uint16_t*) (part + index + 6);
+            //pave->payload_size = (const uint32_t*) (part + index + 8);
+            message = x264PacketPtr(new x264_image_transport::x264Packet());
+            message->img_width = pave->display_width;
+            message->img_height = pave->display_height;
+            message->header.stamp.fromSec(*(const uint32_t*) (part + index + 24) / 1000.0);
+            message->codec = pave->video_codec == 4 ? x264_image_transport::x264Packet::CODEC_H264 :
                     pave->video_codec == 3 ? x264_image_transport::x264Packet::CODEC_MPEG4 : -1;
-            if(index + *header_size + *payload_size > this->buffer_size){
+            if(index + pave->header_size+ pave->payload_size > this->buffer_size){
                 ROS_INFO("[%s]Too big payload, skipping frame.(ADVICE: Increase buffer_size)", this->name.c_str());
                 index = 0;
                 continue;
             }
             // This packet did not contain all the data
-            if(partLength - index -  *header_size < *payload_size) {
-                read = partLength - index - *header_size;
+            if(partLength - index -  pave->header_size < pave->payload_size) {
+                read = partLength - index - pave->header_size;
                 check = false;
-                while (read < *payload_size) {
-                    partLength = TEMP_FAILURE_RETRY(recv(socketNumber, part+index+*header_size+read, *payload_size - read,0));
+                while (read < pave->payload_size) {
+                    partLength = TEMP_FAILURE_RETRY(recv(socketNumber, part+index+pave->header_size+read, pave->payload_size - read,0));
                     if(partLength <= 0){
                         check = true;
                         break;
@@ -218,135 +221,19 @@ namespace ar2mav{
                     index = 0;
                     continue;
                 }
-                partLength = index + *header_size + *payload_size;
+                partLength = index + pave->header_size+ pave->payload_size;
             }
 
-            message.data.assign(part+index+*header_size, part+index+*header_size+*payload_size);
+            message->data.assign(part+index+pave->header_size, part+index+pave->header_size+pave->payload_size);
             pub.publish(message);
             //Received more than one packet in the buffer
-            if(partLength - index - *header_size > *payload_size)
-                index += *header_size + *payload_size;
+            if(partLength - index - pave->header_size > pave->payload_size)
+                index += pave->header_size + pave->payload_size;
             else
                 index = 0;
         }
         ROS_INFO("[%s]Closing socket.", this->name.c_str());//, socketNumber, flag, ros::ok());
         close(socketNumber);
-    }
-
-    int fetch_video(ros::NodeHandle nh, std::string drone_ip, int drone_port,
-            int buffer_size, struct timeval timeout, std::string name){
-        //struct sigaction sa;
-        //memset(&sa, 0, sizeof(sa));
-        //sa.sa_handler = quit_signal;
-        //sigfillset(&sa.sa_mask);
-        //sigaction(SIGINT,&sa,NULL);
-        //***************************************************************************
-        //   Socket Addresses
-        //***************************************************************************
-        sockaddr_in myAddr;
-        sockaddr_in droneAddr;
-        bzero(&myAddr, sizeof(myAddr));
-        bzero(&droneAddr, sizeof(droneAddr));
-        myAddr.sin_family = AF_INET;
-        myAddr.sin_addr.s_addr = INADDR_ANY;
-        droneAddr.sin_family = AF_INET;
-        droneAddr.sin_addr.s_addr = inet_addr(drone_ip.c_str());
-        droneAddr.sin_port = htons(drone_port);
-        //***************************************************************************
-        //   Helper variables
-        //***************************************************************************
-        int index, read, result, i;
-        const uint16_t* header_size;
-        const uint32_t* payload_size;
-        unsigned char part[buffer_size];
-        int partLength;
-        bool check;
-        x264_image_transport::x264Packet message;
-        parrot_video_encapsulation_t* pave;
-        index = 0;
-        int errorCount = 0;
-        //***************************************************************************
-        //   Initialise connection and publisher
-        //***************************************************************************
-        int socketNumber = establish_socket(&name, &myAddr, &droneAddr, &timeout);
-        ros::Publisher pub = nh.advertise<x264_image_transport::x264Packet>("/" + name + "/video/x264", 1000);
-        //***************************************************************************
-        //   Decode PaVE packet and send the encoded video stream
-        //***************************************************************************
-        ROS_INFO("[%s]***** START VIDEO STREAM *****", name.c_str());
-        while (ros::ok()) {
-            if(index == 0) {
-                partLength = TEMP_FAILURE_RETRY(recv(socketNumber, part, buffer_size,0));
-                if (partLength <= 0) {
-                    ROS_INFO("[%s][%d]Did not receive video data, trying to recover", name.c_str(), partLength);
-                    if(errorCount > 5){
-                        close(socketNumber);
-                        ros::Duration(timeout.tv_sec + timeout.tv_usec / 1000000.0).sleep();
-                    }
-                    socketNumber = establish_socket(&name, &myAddr, &droneAddr, &timeout);
-                    errorCount++;
-                    index = 0;
-                    continue;
-                }
-                errorCount = 0;
-            }
-            pave = (parrot_video_encapsulation_t *) (part+index);
-            //printPaVE(pave);
-            //ROS_INFO("Codec: %d",pave->video_codec);
-            if (strncmp(pave->signiture,"PaVE", 4) != 0) {
-                ROS_INFO("[%s]PaVE not synchronized, trying to rebind", name.c_str());
-                for(i = 0;i<buffer_size-index-3;i++)
-                    if(strncmp((const char*) (part+index+i),"PaVE", 4) == 0){
-                        index += i;
-                        break;
-                    }
-                if(i == buffer_size-index-3)
-                    index = 0;
-                continue;
-            }
-            header_size = (const uint16_t*) (part + index + 6);
-            payload_size = (const uint32_t*) (part + index + 8);
-            message.img_width = *(const uint16_t*) (part + index + 16);
-            message.img_height = *(const uint16_t*) (part + index + 18);
-            message.header.stamp.fromSec(*(const uint32_t*) (part + index + 24) / 1000.0);
-            message.codec = pave->video_codec == 4 ? x264_image_transport::x264Packet::CODEC_H264 :
-                    pave->video_codec == 3 ? x264_image_transport::x264Packet::CODEC_MPEG4 : -1;
-            if(index + *header_size + *payload_size > buffer_size){
-                ROS_INFO("[%s]Too big payload, skipping frame.(ADVICE: Increase buffer_size)", name.c_str());
-                index = 0;
-                continue;
-            }
-            // This packet did not contain all the data
-            if(partLength - index -  *header_size < *payload_size) {
-                read = partLength - index - *header_size;
-                check = false;
-                while (read < *payload_size) {
-                    partLength = TEMP_FAILURE_RETRY(recv(socketNumber, part+index+*header_size+read, *payload_size - read,0));
-                    if(partLength <= 0){
-                        check = true;
-                        break;
-                    }
-                    read += partLength;
-                }
-                if(check){
-                    ROS_INFO("[%s]Timedout while waiting extra packets", name.c_str());
-                    index = 0;
-                    continue;
-                }
-                partLength = index + *header_size + *payload_size;
-            }
-
-            message.data.assign(part+index+*header_size, part+index+*header_size+*payload_size);
-            pub.publish(message);
-            //Received more than one packet in the buffer
-            if(partLength - index - *header_size > *payload_size)
-                index += *header_size + *payload_size;
-            else
-                index = 0;
-        }
-        ROS_INFO("[%s]Closing socket.", name.c_str());//, socketNumber, flag, ros::ok());
-        close(socketNumber);
-        return 0;
     }
 }
 

@@ -8,9 +8,6 @@
 #define AR2MAV_H
 
 namespace ar2mav{
-    int fetch_video(ros::NodeHandle nh, std::string drone_ip, int drone_port,
-        int buffer_size, struct timeval timeout, std::string name);
-
     class ARDroneVideo{
         private:
             volatile bool active;
@@ -29,8 +26,8 @@ namespace ar2mav{
 
     class ARDroneDriver{
         private:
-            sensor_msgs::CameraInfo bottom_camera;
-            sensor_msgs::CameraInfo front_camera;
+            sensor_msgs::CameraInfoPtr bottom_camera;
+            sensor_msgs::CameraInfoPtr front_camera;
             std::string name;
             boost::shared_ptr<image_transport::PublisherPlugin> image_pub;
             image_transport::Subscriber image_sub;
