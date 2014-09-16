@@ -8,6 +8,10 @@
 #define AR2MAV_H
 
 namespace ar2mav{
+    /**
+     * @brief The ARDroneVideo class
+     * Class which is designed to receive the raw ARDrone2.0 stream and extraxt the x264 frames
+     */
     class ARDroneVideo{
         private:
             volatile bool active;
@@ -20,23 +24,42 @@ namespace ar2mav{
         public:
             ARDroneVideo(){}
             ~ARDroneVideo(){this->active = false;}
+            /**
+             * @brief ARDroneVideo initialises the class from the parameters in the node handle
+             * @param nh
+             */
             ARDroneVideo(ros::NodeHandle nh);
+            /**
+             * @brief fetch_video continously listens to any incoming UDP packets and extraxts the x264 frames
+             */
             void fetch_video();
     };
 
+    /**
+     * @brief The ARDroneDriver class
+     * Class for republishing the raw image together with the CameraInfo for ArDrone2.0
+     */
     class ARDroneDriver{
         private:
             sensor_msgs::CameraInfoPtr bottom_camera;
             sensor_msgs::CameraInfoPtr front_camera;
             std::string name;
-            boost::shared_ptr<image_transport::PublisherPlugin> image_pub;
+            image_transport::Publisher image_pub;
             image_transport::Subscriber image_sub;
             ros::Publisher info_pub;
 
         public:
             ARDroneDriver(){}
             ~ARDroneDriver(){}
-            ARDroneDriver(ros::NodeHandle nh, std::string name, std::string in_transport, std::string out_transport);
+            /**
+             * @brief ARDroneDriver initialises the class from the parameters in the node handle
+             * @param nh
+             */
+            ARDroneDriver(ros::NodeHandle nh);
+            /**
+             * @brief republish_callback republishes the image together with the CameraInfo
+             * @param msg
+             */
             void republish_callback(const sensor_msgs::ImageConstPtr& msg);
     };
 

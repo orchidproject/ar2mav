@@ -15,11 +15,7 @@ namespace ar2mav{
 
     void ARDroneDriverNodelet::onInit(){
         ros::NodeHandle nh(getMTPrivateNodeHandle());
-        std::string name, in_transport, out_transport;
-        nh.param<std::string>("name", name, "drone");
-        nh.param<std::string>("in_transport", in_transport, "x264");
-        nh.param<std::string>("out_transport", out_transport, "raw");
-        this->driver = boost::shared_ptr<ar2mav::ARDroneDriver>(new ar2mav::ARDroneDriver(nh, name, in_transport, out_transport));
+        this->driver = boost::shared_ptr<ar2mav::ARDroneDriver>(new ar2mav::ARDroneDriver(nh));
     }
 
     class ARDroneVideoNodelet : public nodelet::Nodelet{

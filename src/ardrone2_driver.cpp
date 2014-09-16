@@ -1,11 +1,13 @@
 #include <ar2mav/ar2mav.h>
 #include <ros/ros.h>
-#include <nodelet/nodelet.h>
-#include <boost/thread.hpp>
 #include <image_transport/image_transport.h>
-#include <image_transport/publisher_plugin.h>
-#include <pluginlib/class_loader.h>
 
+/**
+ * @brief Loads a CameraInfo from the parameter server
+ * @param[in] nh - the node handle to be used
+ * @param[in] prefix - for retrieving the correct parameters from the server
+ * @returns A CameraInfoPtr with the fill in data
+ */
 sensor_msgs::CameraInfoPtr loadCameraInfo(const ros::NodeHandle& nh, const std::string prefix){
         sensor_msgs::CameraInfoPtr camera = sensor_msgs::CameraInfoPtr(new sensor_msgs::CameraInfo());
         int temp;
@@ -44,34 +46,33 @@ sensor_msgs::CameraInfoPtr loadCameraInfo(const ros::NodeHandle& nh, const std::
         nh.param<int>(prefix + "/roi/do_rectify", temp, 0);
         camera->roi.do_rectify = temp == 0 ? 0 : 1;
         camera->header.frame_id = prefix + "/bottom_camera";
-        //ROS_INFO("%s,%f,%f,%f,%f,%f" ,prefix.c_str(), camera->D[0],camera->D[1],camera->D[2],camera->D[3],camera->D[4]);
         return camera;
     }
 
 namespace ar2mav{
 
-
+    /**
+     * See header file
+     */
     void ARDroneDriver::republish_callback(const sensor_msgs::ImageConstPtr& msg){
             this->bottom_camera->header.stamp = msg->header.stamp;
             this->info_pub.publish(this->bottom_camera);
-            this->image_pub->publish(msg);
+            this->image_pub.publish(msg);
         }
 
-    ARDroneDriver::ARDroneDriver(ros::NodeHandle nh, std::string name, std::string in_transport, std::string out_transport){
-            this->name = name;
+    /**
+     * See header file
+     */
+    ARDroneDriver::ARDroneDriver(ros::NodeHandle nh){
+            nh.param<std::string>("name", this->name, "drone");
             this->bottom_camera = loadCameraInfo(nh,"/" + name + "/bottom_camera");
             this->front_camera = loadCameraInfo(nh,"/" + name + "/front_camera");
-            ROS_INFO("Loaded camera info's complete %s", in_transport.c_str());
             this->info_pub = nh.advertise<sensor_msgs::CameraInfo>("/" + name + "/video/camera_info",5);
             image_transport::ImageTransport it(nh);
-            std::string in_topic = "/" + name + "/video";
-            std::string out_topic = "/" + name + "/video/image_raw";
-            pluginlib::ClassLoader<image_transport::PublisherPlugin> loader("image_transport", "image_transport::PublisherPlugin");
-            std::string lookup_name = image_transport::PublisherPlugin::getLookupName(out_transport);
-            this->image_pub = loader.createInstance(lookup_name);
-            this->image_pub->advertise(nh, out_topic, 1, image_transport::SubscriberStatusCallback(),
-                               image_transport::SubscriberStatusCallback(), ros::VoidPtr(), false);
-            this->image_sub = it.subscribe(in_topic, 1, &ARDroneDriver::republish_callback, this, in_transport);
+            this->image_pub = it.advertise("/" + name + "/video/image_raw",1);
+            std::string in_transport;
+            nh.param<std::string>("in_transport", in_transport, "x264");
+            this->image_sub = it.subscribe("/" + name + "/video", 1, &ARDroneDriver::republish_callback, this, in_transport);
         }
 }
 

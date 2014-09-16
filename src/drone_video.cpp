@@ -3,12 +3,12 @@
 #include <x264_image_transport/x264Packet.h>
 #include <sys/socket.h>
 
-/**
- * Receives ArDrone 2.0 video stream and publishes it on x264_image_transport
- */
-
 typedef boost::shared_ptr<x264_image_transport::x264Packet> x264PacketPtr;
 
+
+/**
+ * The following structures are all written as in the ARDrone SDK 2.0
+ */
 typedef struct { //PaVE
     char signiture[4]; // "PaVE" - used to identify the start of frame
     uint8_t version; // Version code
@@ -39,7 +39,6 @@ typedef struct { //PaVE
 } __attribute__ ((packed)) parrot_video_encapsulation_t;
 
 typedef enum {
-    //PaVE codec IDs
     CODEC_UNKNNOWN = 0,
     CODEC_VLIB,
     CODEC_P264,
@@ -48,11 +47,14 @@ typedef enum {
 } parrot_video_encapsulation_codecs_t;
 
 typedef enum {
-	//PaVE frame types
-    FRAME_TYPE_UNKNNOWN = 0, FRAME_TYPE_IDR_FRAME, // headers followed by I-frame
+    FRAME_TYPE_UNKNNOWN = 0, FRAME_TYPE_IDR_FRAME,
     FRAME_TYPE_I_FRAME, FRAME_TYPE_P_FRAME, FRAME_TYPE_HEADERS
 } parrot_video_encapsulation_frametypes_t;
 
+/**
+ * @brief prints most significant parts of a PaVE packet
+ * @param[in] PaVE - the PaVE to be printed
+ */
 void printPaVE(parrot_video_encapsulation_t* PaVE) {
         printf("\n---------------------------\n");
 
@@ -82,12 +84,16 @@ void printPaVE(parrot_video_encapsulation_t* PaVE) {
         printf("---------------------------\n\n");
 }
 
-const int one = 1;
-
+/**
+ * @brief Sets up a socket connection on which to receive data
+ * @param[in] name String representing the name of the drone, for logging purposes
+ * @param[in] myAddr strucutre representing the host ip address
+ * @param[in] droneAddr sturcture representing the drone ip address
+ * @param[in] timeout timeval sturcture to set up reconnection timeouts
+ * @returns the socketNumber assigned
+ */
 int establish_socket(const std::string* name, sockaddr_in* myAddr, sockaddr_in* droneAddr, const struct timeval* timeout){
-    //***************************************************************************
-    //  Set up sockets
-    //***************************************************************************
+    const int one = 1;
     int socketNumber = socket(AF_INET, SOCK_STREAM, 0);
     while(ros::ok() && connect(socketNumber, (sockaddr*) droneAddr, sizeof(sockaddr_in)) != 0) {
         ROS_INFO("[%s]Did not manage to establish connection", (*name).c_str());
@@ -99,7 +105,9 @@ int establish_socket(const std::string* name, sockaddr_in* myAddr, sockaddr_in* 
 }
 
 namespace ar2mav{
-
+    /**
+     * See header file
+     */
     ARDroneVideo::ARDroneVideo(ros::NodeHandle nh){
         int temp;
         nh.param<int>("buffer_size", this->buffer_size, 65536);
@@ -125,6 +133,9 @@ namespace ar2mav{
         }
     }
 
+    /**
+     * See header file
+     */
     void ARDroneVideo::fetch_video(){
         if(!this->active)
             return;
@@ -143,9 +154,7 @@ namespace ar2mav{
         //***************************************************************************
         //   Helper variables
         //***************************************************************************
-        int index, read, result, i;
-        //const uint16_t* header_size;
-        //const uint32_t* pave->payload_size;
+        int index, read, i;
         unsigned char part[buffer_size];
         int partLength;
         bool check;
@@ -154,7 +163,7 @@ namespace ar2mav{
         index = 0;
         int errorCount = 0;
         //***************************************************************************
-        //   Initialise connection and publisher
+        //   Initialise connection
         //***************************************************************************
         int socketNumber = establish_socket(&this->name, &myAddr, &droneAddr, &this->timeout);
         //***************************************************************************
@@ -178,8 +187,10 @@ namespace ar2mav{
                 errorCount = 0;
             }
             pave = (parrot_video_encapsulation_t *) (part+index);
-            //printPaVE(pave);
-            //ROS_INFO("Codec: %d",pave->video_codec);
+            //***************************************************************************
+            //   Verify that we have aligned correctly the PaVE packet
+            //   If not try to seek its signiture in the buffer
+            //***************************************************************************
             if (strncmp(pave->signiture,"PaVE", 4) != 0) {
                 ROS_INFO("[%s]PaVE not synchronized, trying to rebind", this->name.c_str());
                 for(i = 0;i<this->buffer_size-index-3;i++)
@@ -191,20 +202,24 @@ namespace ar2mav{
                     index = 0;
                 continue;
             }
-            //header_size = (const uint16_t*) (part + index + 6);
-            //pave->payload_size = (const uint32_t*) (part + index + 8);
+            //***************************************************************************
+            //   When packet is aligned fill in the image meta data into the message
+            //***************************************************************************
             message = x264PacketPtr(new x264_image_transport::x264Packet());
             message->img_width = pave->display_width;
             message->img_height = pave->display_height;
-            message->header.stamp.fromSec(*(const uint32_t*) (part + index + 24) / 1000.0);
-            message->codec = pave->video_codec == 4 ? x264_image_transport::x264Packet::CODEC_H264 :
-                    pave->video_codec == 3 ? x264_image_transport::x264Packet::CODEC_MPEG4 : -1;
-            if(index + pave->header_size+ pave->payload_size > this->buffer_size){
+            message->header.stamp.fromSec(pave->timestamp / 1000.0);
+            message->codec = pave->video_codec == CODEC_MPEG4_AVC ? x264_image_transport::x264Packet::CODEC_H264 :
+                    pave->video_codec == CODEC_MPEG4_VISUAL ? x264_image_transport::x264Packet::CODEC_MPEG4 : -1;
+            if(index + pave->header_size + pave->payload_size > this->buffer_size){
                 ROS_INFO("[%s]Too big payload, skipping frame.(ADVICE: Increase buffer_size)", this->name.c_str());
                 index = 0;
                 continue;
             }
-            // This packet did not contain all the data
+            //***************************************************************************
+            //   If the packet did not contain all the payload have to wait for the rest
+            //   to arrive
+            //***************************************************************************
             if(partLength - index -  pave->header_size < pave->payload_size) {
                 read = partLength - index - pave->header_size;
                 check = false;
@@ -223,10 +238,15 @@ namespace ar2mav{
                 }
                 partLength = index + pave->header_size+ pave->payload_size;
             }
-
+            //***************************************************************************
+            //   After all is correct just fill in encoded image data and publish
+            //***************************************************************************
             message->data.assign(part+index+pave->header_size, part+index+pave->header_size+pave->payload_size);
             pub.publish(message);
-            //Received more than one packet in the buffer
+            //***************************************************************************
+            //  If the buffer contains more than the payload set up the index to point
+            //  at the end of this packet (potentially start of next)
+            //***************************************************************************
             if(partLength - index - pave->header_size > pave->payload_size)
                 index += pave->header_size + pave->payload_size;
             else
