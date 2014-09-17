@@ -2,7 +2,7 @@
   <rosparam file="$(find ar2mav)/drones.yaml" command="load" />
   <rosparam file="$(find ar2mav)/tweety_camera.yaml" command="load" ns="Parrot" /> 
 
-  <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" />
+  <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" output="screen" />
   <node pkg="nodelet" type="nodelet" name="Parrot_video" args="load ar2mav/ARDroneVideoNodelet nodelet_manager" output="screen" >
 	<param name="name" value="Parrot" />
   </node>
