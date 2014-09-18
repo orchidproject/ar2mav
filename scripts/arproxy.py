@@ -35,6 +35,7 @@ SKIP_TYPES = ["SYS_STATUS", "ATTITUDE", "GPS_RAW_INT", "GLOBAL_POSITION_INT", "L
 QGC_PORT = 14555
 EMERGENCY_CODE = 100
 KILL_CODE = 255
+ADHOC_MANUAL = 99
 # Messages
 # HEARTBEAT - sanitised X
 # ATTITUDE - sanitised X
@@ -50,41 +51,36 @@ KILL_CODE = 255
 
 
 class ARProxyConnection:
-    # Verbose levels are 4:
-    # 0 - Nothing printed
-    # 1 - Only information about manual control is printed
-    # 2 - Manual Control Information + some extra
-    # 3 - All incoming data is printed - detailed messages
     def __init__(self, name, ip, in_port, destination, nav_data_port, timeout=10, verbose=0, repeat=1, qgc=False):
-        self.drone = (ip, PORTS["MAVLINK"])
-        self.name = name
-        self.ip = ip
-        self.port = in_port
-        self.host = destination
-        self.nav_data_port = nav_data_port
-        self.connection = None
-        self.target_system = None
-        self.target_component = None
-        self.sdk = None
-        self.alive = False
-        self.timeout = timeout
+        # General input variables required
+        self.drone = (ip, PORTS["MAVLINK"])  # IP address and port for communication with the drone
+        self.name = name  # Name of the drone, mainly for logging purposes
+        self.ip = ip  # Ip of the drone, used to change the system ID to the last digits of the ip
+        self.port = in_port  # Host port to use to request the MAVLink packets to be received on
+        self.host = destination  # Host (ip, port) to which to reroute the MAVLink packages.
+        self.nav_data_port = nav_data_port  # The NAVDATA port on the drone. Required for communication
+        self.connection = None  # This is the MAVLink connection from mavutil.py
+        self.target_system = None   # System ID of the drone. Required to be able to send commands to it.
+        self.target_component = None    # Component ID of the drone. Required to be able to send commands to it.
+        self.sdk = None     # Represents the socket connection for sending packets trough the SDK
+        self.timeout = timeout  #
+        self.alive = True
 
-        self.manual = -1
-        self.emergency = False
-        self.verbose = verbose
-        self.qgc = qgc
+        self.manual = -1    # Indicator if Manual Mode is on
+        self.verbose = verbose  # Verbosity level
+        self.qgc = qgc  # Indicator if packets should be re routed to QGC
+
         # Manual Control variables
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.cmd_seq = 1
-        self.repeat = repeat
+        self.cmd_seq = 1    # Counter for the SDK commands send
+        self.repeat = repeat    # Variable for how many time single command should be repeated
         # SDK variables
-        self.request_navdata_time = 0
-        self.mav_last = 0
-        self.mav_interval = 0.25
-        self.sdk_call = 0
-        self.change_mode = 0
-        # MAVLink meta data variables
+        self.request_navdata_time = 0   # Last time of request for NAVDATA
+        self.mav_last = 0   # Last time a MAVLink message was sent to host
+        self.mav_interval = 0.25    # Interval on which to send MAVLink messages when using the SDK
+        self.sdk_call = 0   # The first recent time when we invoked the SDK
+        self.change_mode = 0    # Counter for how many times we changed the MODE, used for MANUAL/AUTO indication
+
+        # MAVLink meta data variables used for creating or alternating MAVLink messages
         self.base_mode = None
         self.custom_mode = None
         self.status = None
@@ -93,25 +89,20 @@ class ARProxyConnection:
         self.relative_alt = 0.24
 
     def start(self):
-        print("[AR2MAV]%s: ADDRESS: %s" %(self.name, str(self.drone)))
+        print("[AR2MAV]%s: ADDRESS: %s" % (self.name, str(self.drone)))
         self.connection = mavutil.mavlink_connection(self.host[0] + ":" + str(self.port))
         self.sdk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sdk.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        #for i in range(PING_TIMES):
-        #    self.connection.port.sendto(
-        #        mavutil.mavlink.MAVLink_ping_message(time.time() * 1E6, 1, 0, 0).pack(self.connection.mav), self.drone)
-        #    time.sleep(PING_TIMEOUT)
-        #print("[AR2MAV]%s: Waiting Heartbeat" % self.name)
-        #self.connection.wait_heartbeat()
         self.sdk.bind((self.host[0], self.nav_data_port))
         self.sdk.setblocking(0)
-        self.alive = True
-        while self.alive:
+        while True:
+            # Ping the ArdDrone until we receive a heartbeat
             while not self.target_system:
                 print("[AR2MAV]%s: Waiting Heartbeat" % self.name)
                 for i in range(PING_TIMES):
                     self.connection.port.sendto(
-                        mavutil.mavlink.MAVLink_ping_message(time.time() * 1E6, 1, 0, 0).pack(self.connection.mav), self.drone)
+                        mavutil.mavlink.MAVLink_ping_message(time.time() * 1E6, 1, 0, 0).pack(self.connection.mav),
+                        self.drone)
                     time.sleep(PING_TIMEOUT)
                 msg = self.connection.recv_match(type="HEARTBEAT", blocking=False, timeout=self.timeout)
                 if msg:
@@ -119,36 +110,35 @@ class ARProxyConnection:
             # Receive MAVLink messages
             msg = self.connection.recv_match(blocking=False)
             if msg:
-                # print msg
                 if msg.get_type() == "BAD_DATA":
                     if mavutil.all_printable(msg.data):
                         sys.stdout.write(msg.data)
                         sys.stdout.flush()
+                # Received a message from other address than our drone, or from the host
                 elif self.connection.last_address != self.drone and self.connection.last_address != self.host and \
                         ((not self.qgc) or self.connection.last_address != (self.host[0], QGC_PORT)):
+
                     if self.verbose > 0:
-                        print("[AR2MAV]%s: Unregistered AUV with IP(MAV): %s" % (self.name, self.connection.last_address[0]))
+                        print(
+                            "[AR2MAV]%s: Unregistered AUV with IP(MAV): %s" % (
+                                self.name, self.connection.last_address[0]))
                 elif self.connection.last_address != self.drone:
                     self.process_from_host(msg)
                 else:
                     self.process_from_drone(msg)
+            # If we have not received any MAVLink messages recently we have to ping the drone again
             if time.clock() - self.mav_last > self.timeout:
                 self.target_system = None
             # Receive SDK messages
             try:
                 packet, address = self.sdk.recvfrom(65535)
                 if address[0] != self.drone[0]:
-                    self.sdk.sento(msg._msgbuf, (self.host[0], self.nav_data_port+1))
-                    #if self.verbose > 0:
-                    #    print("[AR2MAV]%sU nregistered AUV with IP(SDK): " % self.name + str(address[0]) + "-" + str(self.drone))
+                    self.sdk.sento(msg._msgbuf, (self.host[0], self.nav_data_port + 1))
                 else:
                     self.process_from_sdk(decode_navdata(packet))
             except socket.error as e:
                 if e.errno not in [errno.EAGAIN, errno.EWOULDBLOCK, errno.ECONNREFUSED]:
                     raise
-
-    def stop(self):
-        self.alive = False
 
     def process_from_drone(self, msg):
         if self.verbose > 2:
@@ -157,50 +147,37 @@ class ARProxyConnection:
             self.manual = 0
         self.mav_last = time.clock()
         if msg.get_type() == "HEARTBEAT":
-            # print self.name, " from ", self.connection.source_system
             if self.verbose > 0:
                 print str(self.name) + ": Heartbeat (" + str(msg.base_mode) + "," + str(msg.custom_mode) + ")"
+            # Set the MAV target and component, and retrieve the modes
             self.target_system = msg.get_srcSystem()
             self.target_component = msg.get_srcComponent()
             self.base_mode = msg.base_mode
-            # print msg.base_mode
-            if self.emergency:
-                self.custom_mode = 100
-                msg.custom_mode = 100
-            elif self.relative_alt < 0.25:
+            # Modify modes landed
+            if self.relative_alt < 0.25:
                 self.custom_mode = 9
                 msg.custom_mode = 9
-                # #print msg._msgbuf
-                # msg._msgbuf[6] = 9
-                # crc = mavutil.mavlink.x25crc(msg._msgbuf[1:15])
-                # crc.accumulate(chr(50))
-                # crc = struct.unpack('BB', struct.pack('H', crc.crc))
-                # msg._msgbuf[15] = crc[0]
-                # msg._msgbuf[16] = crc[1]
-                # print msg._msgbuf
             else:
                 self.custom_mode = msg.custom_mode
             self.status = msg.system_status
         if msg.get_type() == "MISSION_CURRENT":
             self.mission_seq = msg.seq
         if msg.get_type() == "GLOBAL_POSITION_INT":
-            # TODO add to SDK
             self.relative_alt = msg.relative_alt / 1E3
+        # Modify the mav source system to the last digits of the IP address
         self.connection.mav.srcSystem = int(self.ip.split(".")[3])
-        # print self.connection.source_system
         self.connection.port.sendto(msg.pack(self.connection.mav), self.host)
+        # Also reroute the message to QGC
         if self.qgc:
             self.connection.port.sendto(msg._msgbuf, (self.host[0], QGC_PORT))
-        # self.connection.port.sendto(msg._msgbuf, self.host)
-        #self.drone = (self.ip, self.connection.last_address[1])
 
     def process_from_sdk(self, data):
         if time.clock() - self.request_navdata_time < 0.2:
             return
-        else:
-            self.emergency = data["ARDRONE_STATE"]["EMERGENCY_MASK"]
+        # If NAVDATA is on
         if data["ARDRONE_STATE"]["NAVDATA_DEMO_MASK"]:
             self.sdk_call = 0
+            # If not all required NAVDATA is on request again
             if not all(flag in data.keys() for flag in REQUIRED_NAVDATA):
                 if self.verbose > 0:
                     print("[AR2MAV]%s: No NAVDATA" % self.name)
@@ -209,27 +186,29 @@ class ARProxyConnection:
                 self.invoke_sdk(SDK_NAVDATA_COMMAND)
                 self.invoke_sdk(SDK_NAVDATA_OPTIONS)
                 self.invoke_sdk(SDK_ACK)
+            # Else we create and send MAVLink messages
             elif time.clock() - self.mav_last > self.mav_interval:
                 if self.verbose > 0:
                     print("[AR2MAV]%s: Make MAVLink" % self.name)
-                    #print data
-                # print data["DEMO"]["CONTROL_STATE"], " ", data["DEMO"]["FLY_STATE"]
-                if self.emergency:
-                    self.custom_mode = 100
-                elif data["DEMO"]["CONTROL_STATE"] < 3 < self.change_mode:
+                # If we are landed and we don't need to acknowledge change to MANUAL mode
+                if data["DEMO"]["CONTROL_STATE"] < 3 < self.change_mode:
                     self.custom_mode = 9
+                # If we need to acknowledge change to MANUAL mode
                 elif self.manual:
                     self.custom_mode = 99
                     self.change_mode += 1
+                # Otherwise we are in AUTO mode
                 else:
                     self.custom_mode = 3
                     self.change_mode += 1
+                # Construct all MAVLink messages and send them
                 msgs = self.construct_mavlink_messages(data)
                 for key in msgs.keys():
                     self.connection.mav.srcSystem = int(self.ip.split(".")[3])
                     self.connection.port.sendto(msgs[key].pack(self.connection.mav), self.host)
                 self.mav_last = time.clock()
         else:
+            # Request NAVDATA
             if self.sdk_call == 0:
                 self.sdk_call = time.clock()
             if time.clock() - self.sdk_call > 5:
@@ -239,16 +218,12 @@ class ARProxyConnection:
             else:
                 if self.verbose > 0:
                     print("[AR2MAV]%s: NAVDATA DEMO GONE WRONG" % self.name)
-                    #print data
                 self.invoke_sdk(SDK_NAVDATA_COMMAND)
                 self.invoke_sdk(SDK_NAVDATA_OPTIONS)
                 self.invoke_sdk(SDK_NAVDATA_CORRECTION)
                 self.invoke_sdk(SDK_ACK)
 
     def process_from_host(self, msg):
-        #if msg.get_type() != "HEARTBEAT":
-        #    print "AR2MAV*****************"
-        #    print msg
         if self.verbose > 2:
             print_msg("From Ground(%s[%d]):" % (self.name, self.manual), msg)
         if self.manual == -1:
@@ -256,16 +231,17 @@ class ARProxyConnection:
                 print("[AR2MAV]%s: No drone" % self.name)
             return
         elif msg.get_type() == "SET_MODE":
-            print "[AR2MAV]%sMODE:(%d,%d)" % (self.name, msg.base_mode,  msg.custom_mode)
             if msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED > 0:
-                if msg.custom_mode == 99:
+                # Switch to MANUAL mode
+                if msg.custom_mode == ADHOC_MANUAL:
                     self.manual = 1
-                    self.custom_mode = 99
+                    self.custom_mode = ADHOC_MANUAL
                     self.change_mode = 0
                     self.invoke_sdk(SDK_NAVDATA_REQUEST)
                     self.invoke_sdk(SDK_NAVDATA_OPTIONS)
                     if self.verbose > 0:
                         print("[AR2MAV]%s: MANUAL MODE ON" % self.name)
+                            # Switch to AUTO mode
                 elif msg.custom_mode == 3:
                     self.manual = 0
                     self.custom_mode = 3
@@ -273,24 +249,21 @@ class ARProxyConnection:
                     self.connection.port.sendto(msg._msgbuf, self.drone)
                     if self.verbose > 0:
                         print("[AR2MAV]%s: MANUAL MODE OFF" % self.name)
+        # Turn on/off emergency mode
         elif msg.get_type() == "COMMAND_LONG" and msg.command == EMERGENCY_CODE:
             self.invoke_sdk(SDK_EMERGENCY)
-            # self.invoke_sdk(SDK_NAVDATA_REQUEST)
-            # self.invoke_sdk(SDK_NAVDATA_OPTIONS)
-        elif msg.get_type() == "COMMAND_LONG" and msg.command == KILL_CODE:
-            self.alive = False
+        # If we are in manual
         elif self.manual:
             self.send_manual_command(msg)
+        # Otherwise reroute the message to the drone
         else:
-            # print msg,":",self.drone
-            # print msg._msgbuf
-            # print self.name, ":" , self.drone
             if hasattr(msg, 'target_system'):
                 msg.target_system = self.target_system
                 msg.target_component = self.target_component
             self.connection.port.sendto(msg.pack(self.connection.mav), self.drone)
 
     def send_manual_command(self, msg):
+        # Accepted manual commands are only TAKEOFF and LAND
         if msg.get_type() == "COMMAND_LONG":
             if msg.command == mavutil.mavlink.MAV_CMD_NAV_TAKEOFF:
                 self.invoke_sdk(SDK_COMMAND, COMMAND_TAKEOFF)
@@ -298,16 +271,17 @@ class ARProxyConnection:
                 self.invoke_sdk(SDK_COMMAND, COMMAND_LAND)
             elif self.verbose > 0:
                 print("[AR2MAV]%s Unsupported manual command: %d" % (self.name, msg.command))
+        # For toggling the cameras
         elif msg.get_type() == "PARAM_SET" and "CAM-RECORD_HORI" in msg.param_id:
-            # print "SS ", msg.param_id, ":", msg.param_id == "CAM-RECORD_HORI"
             self.invoke_sdk(SDK_CAMERA, extra=msg.param_value)
             self.camera_value = msg.param_value
+        # If we are in MANUAL and the host have requested a parameter. Sends back ONLY CAMERA.
         elif msg.get_type() == "PARAM_REQUEST_READ":
-            # print "ZZZZZZZZZZZZZZZZZZZZZZ"
             message = mavutil.mavlink.MAVLink_param_value_message(msg.param_id, self.camera_value,
                                                                   mavutil.mavlink.MAVLINK_TYPE_FLOAT,
                                                                   14, 12)
             self.connection.port.sendto(message.pack(self.connection.mav), self.host)
+        # For manual control
         elif msg.get_type() == "RC_CHANNELS_OVERRIDE":
             self.invoke_sdk(SDK_RC,
                             (msg.chan1_raw, msg.chan2_raw, msg.chan3_raw, msg.chan4_raw))
@@ -404,7 +378,6 @@ class ARProxyConnection:
             struct.unpack("B", struct.pack("B", 0))[0])
         return messages
 
-
 def print_msg(prefix, msg):
     if msg.get_type() not in SKIP_TYPES:
         print("[AR2MAV]%s %s[%s]" % (
@@ -415,6 +388,7 @@ def load_file(path):
     mapping = dict()
     if path.endswith(".yaml"):
         import yaml
+
         stream = open(path, "r")
         content = yaml.load(stream)
         stream.close()
@@ -422,6 +396,7 @@ def load_file(path):
             mapping[name] = content["drones"][name]
     elif path.endswith(".csv"):
         import csv
+
         stream = open(path, "r")
         content = csv.reader(stream)
         i = 1

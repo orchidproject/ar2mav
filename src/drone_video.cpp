@@ -129,7 +129,7 @@ namespace ar2mav{
                 //ROS_INFO("[%s]Did not found IP in the parameter server, switchin to args for IP", this->name.c_str());
                 nh.param<std::string>("drone_ip", this->drone_ip, "192.168.1.1");
             }
-            this->pub = nh.advertise<x264_image_transport::x264Packet>("/" + this->name + "/video/x264", 1000);
+            this->pub = nh.advertise<x264_image_transport::x264Packet>(ros::this_node::getNamespace() + "/x264", 1000);
         }
     }
 

@@ -67,12 +67,12 @@ namespace ar2mav{
             nh.param<std::string>("name", this->name, "drone");
             this->bottom_camera = loadCameraInfo(nh,"/" + name + "/bottom_camera");
             this->front_camera = loadCameraInfo(nh,"/" + name + "/front_camera");
-            this->info_pub = nh.advertise<sensor_msgs::CameraInfo>("/" + name + "/video/camera_info",5);
+            this->info_pub = nh.advertise<sensor_msgs::CameraInfo>(ros::this_node::getNamespace() + "/camera_info",5);
             image_transport::ImageTransport it(nh);
-            this->image_pub = it.advertise("/" + name + "/video/image_raw",1);
+            this->image_pub = it.advertise(ros::this_node::getNamespace() + "/image_raw",1);
             std::string in_transport;
             nh.param<std::string>("in_transport", in_transport, "x264");
-            this->image_sub = it.subscribe("/" + name + "/video", 1, &ARDroneDriver::republish_callback, this, in_transport);
+            this->image_sub = it.subscribe(ros::this_node::getNamespace(), 1, &ARDroneDriver::republish_callback, this, in_transport);
         }
 }
 
