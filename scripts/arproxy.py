@@ -378,17 +378,18 @@ class ARProxyConnection:
             struct.unpack("B", struct.pack("B", 0))[0])
         return messages
 
+# Just print a MAVlink message
 def print_msg(prefix, msg):
     if msg.get_type() not in SKIP_TYPES:
         print("[AR2MAV]%s %s[%s]" % (
             prefix, msg.get_type(), ", ".join("%s:%s" % (i, str(msg.__dict__[i])) for i in msg._fieldnames)))
 
 
+# Load a parameter file
 def load_file(path):
     mapping = dict()
     if path.endswith(".yaml"):
         import yaml
-
         stream = open(path, "r")
         content = yaml.load(stream)
         stream.close()
