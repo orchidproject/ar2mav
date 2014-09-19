@@ -44,9 +44,8 @@ namespace ar2mav{
             sensor_msgs::CameraInfoPtr bottom_camera;
             sensor_msgs::CameraInfoPtr front_camera;
             std::string name;
-            image_transport::Publisher image_pub;
-            image_transport::Subscriber image_sub;
-            ros::Publisher info_pub;
+            image_transport::CameraPublisher pub;
+            image_transport::Subscriber sub;
 
         public:
             ARDroneDriver(){}

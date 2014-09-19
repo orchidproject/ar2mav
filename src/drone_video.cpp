@@ -129,7 +129,7 @@ namespace ar2mav{
                 //ROS_INFO("[%s]Did not found IP in the parameter server, switchin to args for IP", this->name.c_str());
                 nh.param<std::string>("drone_ip", this->drone_ip, "192.168.1.1");
             }
-            this->pub = nh.advertise<x264_image_transport::x264Packet>(ros::this_node::getNamespace() + "/x264", 1000);
+            this->pub = nh.advertise<x264_image_transport::x264Packet>("/" + this->name + "/video/x264", 1000);
         }
     }
 
@@ -242,7 +242,7 @@ namespace ar2mav{
             //   After all is correct just fill in encoded image data and publish
             //***************************************************************************
             message->data.assign(part+index+pave->header_size, part+index+pave->header_size+pave->payload_size);
-            pub.publish(message);
+            this->pub.publish(message);
             //***************************************************************************
             //  If the buffer contains more than the payload set up the index to point
             //  at the end of this packet (potentially start of next)
