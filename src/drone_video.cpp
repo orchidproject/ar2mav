@@ -3,6 +3,16 @@
 #include <x264_image_transport/x264Packet.h>
 #include <sys/socket.h>
 
+// Patch for platforms without GNU TEMP_FAILURE_RETRY macro
+// (Notably BSD/OSX)
+#ifndef TEMP_FAILURE_RETRY
+#define TEMP_FAILURE_RETRY(expr) \
+    ({ long int _res; \
+        do _res = (long int) (expr); \
+        while (_res == -1L && errno == EINTR); \
+        _res; })
+#endif
+
 typedef boost::shared_ptr<x264_image_transport::x264Packet> x264PacketPtr;
 
 
