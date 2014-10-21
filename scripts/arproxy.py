@@ -17,17 +17,15 @@ NAVDATA_OPTIONS = 0
 for data in REQUIRED_NAVDATA:
     NAVDATA_OPTIONS |= 1 << NAVDATA_OPTIONS_STR[data]
 
-SDK_COMMAND = 0
-SDK_ACK = 1
-SDK_RC = 2
-SDK_CAMERA = 3
-SDK_EMERGENCY = 4
-SDK_NAVDATA_REQUEST = 10
-SDK_NAVDATA_COMMAND = 11
-SDK_NAVDATA_OPTIONS = 12
-SDK_NAVDATA_CORRECTION = 13
-PING_TIMES = 5
-PING_TIMEOUT = 1
+PARROT_API_COMMAND = 0
+PARROT_API_ACK = 1
+PARROT_API_RC = 2
+PARROT_API_CAMERA = 3
+PARROT_API_EMERGENCY = 4
+PARROT_API_NAVDATA_REQUEST = 10
+PARROT_API_NAVDATA_COMMAND = 11
+PARROT_API_NAVDATA_OPTIONS = 12
+PARROT_API_NAVDATA_CORRECTION = 13
 
 SKIP_TYPES = ["SYS_STATUS", "ATTITUDE", "GPS_RAW_INT", "GLOBAL_POSITION_INT", "LOCAL_POSITION_NED", "RAW_IMU",
               "NAV_CONTROLLER_OUTPUT", "VFR_HUD"]
@@ -62,7 +60,7 @@ class ARProxyConnection:
         self.connection = None  # This is the MAVLink connection from mavutil.py
         self.target_system = None   # System ID of the drone. Required to be able to send commands to it.
         self.target_component = None    # Component ID of the drone. Required to be able to send commands to it.
-        self.sdk = None     # Represents the socket connection for sending packets trough the SDK
+        self.parrot_api_conn = None     # Represents the socket connection for sending packets trough the PARROT API
         self.timeout = timeout  #
         self.alive = True
 
@@ -71,13 +69,13 @@ class ARProxyConnection:
         self.qgc = qgc  # Indicator if packets should be re routed to QGC
 
         # Manual Control variables
-        self.cmd_seq = 1    # Counter for the SDK commands send
+        self.cmd_seq = 1    # Counter for the PARROT API commands send
         self.repeat = repeat    # Variable for how many time single command should be repeated
-        # SDK variables
+        # PARROT API variables
         self.request_navdata_time = 0   # Last time of request for NAVDATA
         self.mav_last = 0   # Last time a MAVLink message was sent to host
-        self.mav_interval = 0.25    # Interval on which to send MAVLink messages when using the SDK
-        self.sdk_call = 0   # The first recent time when we invoked the SDK
+        self.mav_interval = 0.25    # Interval on which to send MAVLink messages when using the PARROT API
+        self.parrot_api_call = 0   # The first recent time when we invoked the PARROT API
         self.change_mode = 0    # Counter for how many times we changed the MODE, used for MANUAL/AUTO indication
 
         # MAVLink meta data variables used for creating or alternating MAVLink messages
@@ -89,55 +87,149 @@ class ARProxyConnection:
         self.relative_alt = 0.24
 
     def start(self):
-        print("[AR2MAV]%s: ADDRESS: %s" % (self.name, str(self.drone)))
-        self.connection = mavutil.mavlink_connection(self.host[0] + ":" + str(self.port))
-        self.sdk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sdk.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.sdk.bind((self.host[0], self.nav_data_port))
-        self.sdk.setblocking(0)
-        while True:
-            # Ping the ArdDrone until we receive a heartbeat
-            while not self.target_system:
-                print("[AR2MAV]%s: Waiting Heartbeat" % self.name)
-                for i in range(PING_TIMES):
-                    self.connection.port.sendto(
-                        mavutil.mavlink.MAVLink_ping_message(time.time() * 1E6, 1, 0, 0).pack(self.connection.mav),
-                        self.drone)
-                    time.sleep(PING_TIMEOUT)
-                msg = self.connection.recv_match(type="HEARTBEAT", blocking=False, timeout=self.timeout)
-                if msg:
-                    self.process_from_drone(msg)
-            # Receive MAVLink messages
-            msg = self.connection.recv_match(blocking=False)
-            if msg:
-                if msg.get_type() == "BAD_DATA":
-                    if mavutil.all_printable(msg.data):
-                        sys.stdout.write(msg.data)
-                        sys.stdout.flush()
-                # Received a message from other address than our drone, or from the host
-                elif self.connection.last_address != self.drone and self.connection.last_address != self.host and \
-                        ((not self.qgc) or self.connection.last_address != (self.host[0], QGC_PORT)):
+        """Starts MAVLink proxy for a single drone"""
 
-                    if self.verbose > 0:
-                        print(
-                            "[AR2MAV]%s: Unregistered AUV with IP(MAV): %s" % (
-                                self.name, self.connection.last_address[0]))
-                elif self.connection.last_address != self.drone:
-                    self.process_from_host(msg)
-                else:
-                    self.process_from_drone(msg)
-            # If we have not received any MAVLink messages recently we have to ping the drone again
+        print("[AR2MAV]%s: ADDRESS: %s" % (self.name, str(self.drone)))
+
+        #**********************************************************************
+        # Set up connection to handle mavlink communication
+        #**********************************************************************
+        self.connection = mavutil.mavlink_connection(self.host[0] + ":" +
+                str(self.port))
+
+        #**********************************************************************
+        # Setup Parrot API connection with blocking on
+        # i.e. we'll wait forever to receive a message
+        #**********************************************************************
+        self.parrot_api_conn = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.parrot_api_conn.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.parrot_api_conn.bind((self.host[0], self.nav_data_port))
+        self.parrot_api_conn.settimeout(None)
+
+        #**********************************************************************
+        #   Spawn thread to handle mavlink messages
+        #**********************************************************************
+        print("[AR2MAV]%s: Starting mavlink thread" % self.name)
+        mavlink_name = "Thread-" + self.name + "-mavlink"
+        mavlink_thread = threading.Thread(name=mavlink_name,
+                                          target=self.handle_mavlink)
+        mavlink_thread.setDaemon(True)
+        mavlink_thread.start()
+
+        #**********************************************************************
+        #   Spawn thread to handle parrot api messages
+        #**********************************************************************
+        print("[AR2MAV]%s: Starting Parrot API thread" % self.name)
+        parrot_name = "Thread-" + self.name + "-parrot-api"
+        parrot_thread = threading.Thread(name=parrot_name,
+                                          target=self.handle_parrot_api)
+        parrot_thread.setDaemon(True)
+        parrot_thread.start()
+
+        #**********************************************************************
+        # Main loop: Periodically pings the drone to keep communication
+        # alive.
+        #**********************************************************************
+        drone_connected = False
+        while True:
             if time.clock() - self.mav_last > self.timeout:
-                self.target_system = None
-            # Receive SDK messages
+                print("[AR2MAV]%s: Waiting for Heartbeat" % self.name)
+                drone_connected = False
+                self.connection.port.sendto(
+                    mavutil.mavlink.MAVLink_ping_message(time.time() * 1E6, 1, 0, 0).pack(self.connection.mav),
+                    self.drone)
+            elif not drone_connected and self.target_system is not None:
+                drone_connected = True
+                print("[AR2MAV]%s: now connected" % self.name)
+            time.sleep(self.timeout)
+
+    def handle_mavlink(self):
+        """Main loop for handling all mavlink communication
+
+           Incoming mavlink messages may be from drone, host, or
+           QGroundControl. This method dispatches and processes
+           messages separately in each case.
+
+           This runs inside its own thread.
+        """
+
+        #**********************************************************************
+        #   Process mavlink messages (forever)
+        #**********************************************************************
+        while True:
+
+            #******************************************************************
+            #   Wait (forever) until we receive a mavlink message
+            #******************************************************************
+            msg = self.connection.recv_match(blocking=True)
+
+            #******************************************************************
+            # If recv_match returns without a message, then try again
+            # This shouldn't really happen because we've asked to block until
+            # a message is available
+            #******************************************************************
+            if msg is None:
+                print("[AR2MAV]%s: mavlink unexpectedly returned nothing." %
+                      self.name)
+
+            #******************************************************************
+            # Write out bad data (shouldn't happen either)
+            #******************************************************************
+            elif msg.get_type() == "BAD_DATA":
+                print("[AR2MAV]%s: Received bad data -- ignoring." %
+                      self.name)
+                if mavutil.all_printable(msg.data):
+                    sys.stdout.write(msg.data)
+                    sys.stdout.flush()
+
+            #******************************************************************
+            # Process data from drone
+            #******************************************************************
+            elif self.connection.last_address == self.drone:
+                self.process_from_drone(msg)
+
+            #******************************************************************
+            # Process data from host
+            #******************************************************************
+            elif self.connection.last_address == self.host:
+                self.process_from_host(msg)
+
+            #******************************************************************
+            # Process data from QGroundControl (we should be able to treat
+            # this just like data from the host)
+            #******************************************************************
+            elif self.qgc and \
+                 self.connection.last_address == (self.host[0], QGC_PORT):
+                self.process_from_host(msg)
+
+            #******************************************************************
+            # Ignore data from anyone else
+            #******************************************************************
+            else:
+                if self.verbose > 0:
+                    print("[AR2MAV]%s: Unregistered AUV with IP(MAV): %s" %
+                          (self.name, self.connection.last_address[0]))
+
+    def handle_parrot_api(self):
+        """Main loop for handling communication with Parrot API
+           This runs insidhe its own thread.
+        """
+
+        #**********************************************************************
+        #   Process mavlink messages (forever)
+        #   Don't actually understand this code - hopefully it works :-(
+        #**********************************************************************
+        while True:
             try:
-                packet, address = self.sdk.recvfrom(65535)
+                packet, address = self.parrot_api_conn.recvfrom(65535)
                 if address[0] != self.drone[0]:
-                    self.sdk.sento(msg._msgbuf, (self.host[0], self.nav_data_port + 1))
+                    self.parrot_api_conn.sento(msg._msgbuf,
+                        (self.host[0], self.nav_data_port + 1))
                 else:
-                    self.process_from_sdk(decode_navdata(packet))
+                    self.process_from_parrot_api(decode_navdata(packet))
             except socket.error as e:
-                if e.errno not in [errno.EAGAIN, errno.EWOULDBLOCK, errno.ECONNREFUSED]:
+                if e.errno not in [errno.EAGAIN, errno.EWOULDBLOCK,
+                                   errno.ECONNREFUSED]:
                     raise
 
     def process_from_drone(self, msg):
@@ -147,7 +239,7 @@ class ARProxyConnection:
             self.manual = 0
         self.mav_last = time.clock()
         if msg.get_type() == "HEARTBEAT":
-            if self.verbose > 0:
+            if self.verbose > 1:
                 print str(self.name) + ": Heartbeat (" + str(msg.base_mode) + "," + str(msg.custom_mode) + ")"
             # Set the MAV target and component, and retrieve the modes
             self.target_system = msg.get_srcSystem()
@@ -171,21 +263,21 @@ class ARProxyConnection:
         if self.qgc:
             self.connection.port.sendto(msg._msgbuf, (self.host[0], QGC_PORT))
 
-    def process_from_sdk(self, data):
+    def process_from_parrot_api(self, data):
         if time.clock() - self.request_navdata_time < 0.2:
             return
         # If NAVDATA is on
         if data["ARDRONE_STATE"]["NAVDATA_DEMO_MASK"]:
-            self.sdk_call = 0
+            self.parrot_api_call = 0
             # If not all required NAVDATA is on request again
             if not all(flag in data.keys() for flag in REQUIRED_NAVDATA):
                 if self.verbose > 0:
                     print("[AR2MAV]%s: No NAVDATA" % self.name)
                 if self.verbose > 2:
                     print self.name, data.keys()
-                self.invoke_sdk(SDK_NAVDATA_COMMAND)
-                self.invoke_sdk(SDK_NAVDATA_OPTIONS)
-                self.invoke_sdk(SDK_ACK)
+                self.invoke_parrot_api(PARROT_API_NAVDATA_COMMAND)
+                self.invoke_parrot_api(PARROT_API_NAVDATA_OPTIONS)
+                self.invoke_parrot_api(PARROT_API_ACK)
             # Else we create and send MAVLink messages
             elif time.clock() - self.mav_last > self.mav_interval:
                 if self.verbose > 0:
@@ -209,26 +301,26 @@ class ARProxyConnection:
                 self.mav_last = time.clock()
         else:
             # Request NAVDATA
-            if self.sdk_call == 0:
-                self.sdk_call = time.clock()
-            if time.clock() - self.sdk_call > 5:
+            if self.parrot_api_call == 0:
+                self.parrot_api_call = time.clock()
+            if time.clock() - self.parrot_api_call > 5:
                 print("[AR2MAV]%s: NAVDATA DEMO GONE WRONG for more than 5 seconds" % self.name)
                 print("[AR2MAV]%s: Switching back to MANUAL" % self.name)
                 self.manual = False
             else:
                 if self.verbose > 0:
                     print("[AR2MAV]%s: NAVDATA DEMO GONE WRONG" % self.name)
-                self.invoke_sdk(SDK_NAVDATA_COMMAND)
-                self.invoke_sdk(SDK_NAVDATA_OPTIONS)
-                self.invoke_sdk(SDK_NAVDATA_CORRECTION)
-                self.invoke_sdk(SDK_ACK)
+                self.invoke_parrot_api(PARROT_API_NAVDATA_COMMAND)
+                self.invoke_parrot_api(PARROT_API_NAVDATA_OPTIONS)
+                self.invoke_parrot_api(PARROT_API_NAVDATA_CORRECTION)
+                self.invoke_parrot_api(PARROT_API_ACK)
 
     def process_from_host(self, msg):
         if self.verbose > 2:
             print_msg("From Ground(%s[%d]):" % (self.name, self.manual), msg)
         if self.manual == -1:
             if self.verbose > 0:
-                print("[AR2MAV]%s: No drone" % self.name)
+                print("[AR2MAV]%s: Ignoring host - No drone connected" % self.name)
             return
         elif msg.get_type() == "SET_MODE":
             if msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED > 0:
@@ -237,8 +329,8 @@ class ARProxyConnection:
                     self.manual = 1
                     self.custom_mode = ADHOC_MANUAL
                     self.change_mode = 0
-                    self.invoke_sdk(SDK_NAVDATA_REQUEST)
-                    self.invoke_sdk(SDK_NAVDATA_OPTIONS)
+                    self.invoke_parrot_api(PARROT_API_NAVDATA_REQUEST)
+                    self.invoke_parrot_api(PARROT_API_NAVDATA_OPTIONS)
                     if self.verbose > 0:
                         print("[AR2MAV]%s: MANUAL MODE ON" % self.name)
                             # Switch to AUTO mode
@@ -251,7 +343,7 @@ class ARProxyConnection:
                         print("[AR2MAV]%s: MANUAL MODE OFF" % self.name)
         # Turn on/off emergency mode
         elif msg.get_type() == "COMMAND_LONG" and msg.command == EMERGENCY_CODE:
-            self.invoke_sdk(SDK_EMERGENCY)
+            self.invoke_parrot_api(PARROT_API_EMERGENCY)
         # If we are in manual
         elif self.manual:
             self.send_manual_command(msg)
@@ -266,14 +358,14 @@ class ARProxyConnection:
         # Accepted manual commands are only TAKEOFF and LAND
         if msg.get_type() == "COMMAND_LONG":
             if msg.command == mavutil.mavlink.MAV_CMD_NAV_TAKEOFF:
-                self.invoke_sdk(SDK_COMMAND, COMMAND_TAKEOFF)
+                self.invoke_parrot_api(PARROT_API_COMMAND, COMMAND_TAKEOFF)
             elif msg.command == mavutil.mavlink.MAV_CMD_NAV_LAND:
-                self.invoke_sdk(SDK_COMMAND, COMMAND_LAND)
+                self.invoke_parrot_api(PARROT_API_COMMAND, COMMAND_LAND)
             elif self.verbose > 0:
                 print("[AR2MAV]%s Unsupported manual command: %d" % (self.name, msg.command))
         # For toggling the cameras
         elif msg.get_type() == "PARAM_SET" and "CAM-RECORD_HORI" in msg.param_id:
-            self.invoke_sdk(SDK_CAMERA, extra=msg.param_value)
+            self.invoke_parrot_api(PARROT_API_CAMERA, extra=msg.param_value)
             self.camera_value = msg.param_value
         # If we are in MANUAL and the host have requested a parameter. Sends back ONLY CAMERA.
         elif msg.get_type() == "PARAM_REQUEST_READ":
@@ -283,24 +375,24 @@ class ARProxyConnection:
             self.connection.port.sendto(message.pack(self.connection.mav), self.host)
         # For manual control
         elif msg.get_type() == "RC_CHANNELS_OVERRIDE":
-            self.invoke_sdk(SDK_RC,
+            self.invoke_parrot_api(PARROT_API_RC,
                             (msg.chan1_raw, msg.chan2_raw, msg.chan3_raw, msg.chan4_raw))
 
-    def invoke_sdk(self, command, extra=0):
+    def invoke_parrot_api(self, command, extra=0):
         msg = None
-        if command == SDK_NAVDATA_REQUEST:
-            self.sdk.sendto("\x01\x00\x00\x00", (self.drone[0], PORTS["NAVDATA"]))
+        if command == PARROT_API_NAVDATA_REQUEST:
+            self.parrot_api_conn.sendto("\x01\x00\x00\x00", (self.drone[0], PORTS["NAVDATA"]))
             self.request_navdata_time = time.clock()
             return
-        elif command == SDK_NAVDATA_COMMAND:
+        elif command == PARROT_API_NAVDATA_COMMAND:
             msg = "AT*CONFIG={},\"general:navdata_demo\",\"TRUE\"\r"
-        elif command == SDK_NAVDATA_CORRECTION:
+        elif command == PARROT_API_NAVDATA_CORRECTION:
             msg = "AT*CONFIG={},\"general:video_enable\",\"TRUE\"\r"
-        elif command == SDK_NAVDATA_OPTIONS:
+        elif command == PARROT_API_NAVDATA_OPTIONS:
             msg = "AT*CONFIG={},\"general:navdata_options\",\"%d\"\r" % NAVDATA_OPTIONS
-        elif command == SDK_COMMAND:
+        elif command == PARROT_API_COMMAND:
             msg = "AT*REF={},%d\r" % extra
-        elif command == SDK_RC:
+        elif command == PARROT_API_RC:
             if len(extra) == 6:
                 rc = struct.unpack('iiiiii', struct.pack('ffffff',
                                                          (extra[0] - 1500) / 500,
@@ -317,19 +409,19 @@ class ARProxyConnection:
                                                        (extra[2] - 1500) / 500,
                                                        (extra[3] - 1500) / 500))
                 msg = "AT*PCMD={},1," + ",".join([str(i) for i in rc]) + "\r"
-        elif command == SDK_ACK:
+        elif command == PARROT_API_ACK:
             msg = "AT*CTRL={},0,0\r"
-        elif command == SDK_CAMERA:
+        elif command == PARROT_API_CAMERA:
             msg = "AT*CONFIG={},\"video:video_channel\",\"%d\"\r" % (extra > 0)
-        elif command == SDK_EMERGENCY:
+        elif command == PARROT_API_EMERGENCY:
             msg = "AT*REF={},%d\r" % COMMAND_EMERGENCY
             for i in range(self.repeat):
-                self.sdk.sendto(msg.format(self.cmd_seq + i), (self.drone[0], PORTS["AT"]))
+                self.parrot_api_conn.sendto(msg.format(self.cmd_seq + i), (self.drone[0], PORTS["AT"]))
             self.cmd_seq += self.repeat
             time.sleep(self.mav_interval)
             msg = "AT*REF={},%d\r" % COMMAND_LAND
         for i in range(self.repeat):
-            self.sdk.sendto(msg.format(self.cmd_seq + i), (self.drone[0], PORTS["AT"]))
+            self.parrot_api_conn.sendto(msg.format(self.cmd_seq + i), (self.drone[0], PORTS["AT"]))
             if self.verbose > 2:
                 print("[AR2MAV]" + str(self.name) + str(msg.format(self.cmd_seq + i)))
         self.cmd_seq += self.repeat
