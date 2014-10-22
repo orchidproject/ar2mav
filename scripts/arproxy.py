@@ -73,7 +73,7 @@ class ARProxyConnection:
         self.repeat = repeat    # Variable for how many time single command should be repeated
         # PARROT API variables
         self.request_navdata_time = 0   # Last time of request for NAVDATA
-        self.mav_last = 0   # Last time a MAVLink message was sent to host
+        self.mav_last = -2.0*timeout   # Last time a MAVLink message was sent to host
         self.mav_interval = 0.25    # Interval on which to send MAVLink messages when using the PARROT API
         self.parrot_api_call = 0   # The first recent time when we invoked the PARROT API
         self.change_mode = 0    # Counter for how many times we changed the MODE, used for MANUAL/AUTO indication
@@ -125,6 +125,7 @@ class ARProxyConnection:
                                           target=self.handle_parrot_api)
         parrot_thread.setDaemon(True)
         parrot_thread.start()
+        print("[AR2MAV]%s: Threads active" % self.name)
 
         #**********************************************************************
         # Main loop: Periodically pings the drone to keep communication
@@ -132,7 +133,7 @@ class ARProxyConnection:
         #**********************************************************************
         drone_connected = False
         while True:
-            if time.clock() - self.mav_last > self.timeout:
+            if time.time() - self.mav_last > self.timeout:
                 print("[AR2MAV]%s: Waiting for Heartbeat" % self.name)
                 drone_connected = False
                 self.connection.port.sendto(
@@ -235,9 +236,9 @@ class ARProxyConnection:
     def process_from_drone(self, msg):
         if self.verbose > 2:
             print_msg("From %s:" % self.name, msg)
-        if time.clock() - self.request_navdata_time > 1:
+        if time.time() - self.request_navdata_time > 1:
             self.manual = 0
-        self.mav_last = time.clock()
+        self.mav_last = time.time()
         if msg.get_type() == "HEARTBEAT":
             if self.verbose > 1:
                 print str(self.name) + ": Heartbeat (" + str(msg.base_mode) + "," + str(msg.custom_mode) + ")"
@@ -264,7 +265,7 @@ class ARProxyConnection:
             self.connection.port.sendto(msg._msgbuf, (self.host[0], QGC_PORT))
 
     def process_from_parrot_api(self, data):
-        if time.clock() - self.request_navdata_time < 0.2:
+        if time.time() - self.request_navdata_time < 0.2:
             return
         # If NAVDATA is on
         if data["ARDRONE_STATE"]["NAVDATA_DEMO_MASK"]:
@@ -279,7 +280,7 @@ class ARProxyConnection:
                 self.invoke_parrot_api(PARROT_API_NAVDATA_OPTIONS)
                 self.invoke_parrot_api(PARROT_API_ACK)
             # Else we create and send MAVLink messages
-            elif time.clock() - self.mav_last > self.mav_interval:
+            elif time.time() - self.mav_last > self.mav_interval:
                 if self.verbose > 0:
                     print("[AR2MAV]%s: Make MAVLink" % self.name)
                 # If we are landed and we don't need to acknowledge change to MANUAL mode
@@ -298,12 +299,12 @@ class ARProxyConnection:
                 for key in msgs.keys():
                     self.connection.mav.srcSystem = int(self.ip.split(".")[3])
                     self.connection.port.sendto(msgs[key].pack(self.connection.mav), self.host)
-                self.mav_last = time.clock()
+                self.mav_last = time.time()
         else:
             # Request NAVDATA
             if self.parrot_api_call == 0:
-                self.parrot_api_call = time.clock()
-            if time.clock() - self.parrot_api_call > 5:
+                self.parrot_api_call = time.time()
+            if time.time() - self.parrot_api_call > 5:
                 print("[AR2MAV]%s: NAVDATA DEMO GONE WRONG for more than 5 seconds" % self.name)
                 print("[AR2MAV]%s: Switching back to MANUAL" % self.name)
                 self.manual = False
@@ -382,7 +383,7 @@ class ARProxyConnection:
         msg = None
         if command == PARROT_API_NAVDATA_REQUEST:
             self.parrot_api_conn.sendto("\x01\x00\x00\x00", (self.drone[0], PORTS["NAVDATA"]))
-            self.request_navdata_time = time.clock()
+            self.request_navdata_time = time.time()
             return
         elif command == PARROT_API_NAVDATA_COMMAND:
             msg = "AT*CONFIG={},\"general:navdata_demo\",\"TRUE\"\r"
