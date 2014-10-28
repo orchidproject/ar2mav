@@ -1,0 +1,20 @@
+<launch>
+
+    <rosparam file="$(find ar2mav)/drones.yaml" command="load" />
+    <rosparam file="$(find ar2mav)/tweety_camera.yaml" command="load" ns="Parrot" /> 
+    <arg name="name" default="Parrot" />
+
+    <node  pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" output="screen" />
+
+    <node pkg="nodelet" type="nodelet" name="$(arg name)_video" args="load ar2mav/ARDroneVideoNodelet nodelet_manager" output="screen" >
+        <param name="name" value="$(arg name)" />
+    </node>
+
+    <node pkg="nodelet" type="nodelet" name="$(arg name)_driver" args="load ar2mav/ARDroneDriverNodelet nodelet_manager" output="screen" >
+        <param name="name" value="$(arg name)" />
+    </node>
+
+
+</launch>
+
+

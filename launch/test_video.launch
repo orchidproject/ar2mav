@@ -1,27 +1,33 @@
 <launch>
-  <rosparam file="$(find ar2mav)/drones.yaml" command="load" />
-  <rosparam file="$(find ar2mav)/tweety_camera.yaml" command="load" ns="Parrot" /> 
-  <arg name="name" default="Parrot" />
 
-  <node  pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" output="screen" />
-  <node pkg="nodelet" type="nodelet" name="$(arg name)_video" args="load ar2mav/ARDroneVideoNodelet nodelet_manager" output="screen" >
-	<param name="name" value="$(arg name)" />
-  </node>
-  <node pkg="nodelet" type="nodelet" name="$(arg name)_driver" args="load ar2mav/ARDroneDriverNodelet nodelet_manager" output="screen" >
-	<param name="name" value="$(arg name)" />
-  </node>
-  <node pkg="nodelet" type="nodelet" name="debayer" args="load image_proc/debayer nodelet_manager --no-bond" >
--	<remap from="image_raw" to="/$(arg name)/video/image_raw" />
+    <rosparam file="$(find ar2mav)/drones.yaml" command="load" />
+    <rosparam file="$(find ar2mav)/tweety_camera.yaml" command="load" ns="Parrot" /> 
+    <arg name="name" default="Parrot" />
+
+    <node  pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" output="screen" />
+
+    <node pkg="nodelet" type="nodelet" name="$(arg name)_video" args="load ar2mav/ARDroneVideoNodelet nodelet_manager" output="screen" >
+        <param name="name" value="$(arg name)" />
+    </node>
+
+    <node pkg="nodelet" type="nodelet" name="$(arg name)_driver" args="load ar2mav/ARDroneDriverNodelet nodelet_manager" output="screen" >
+        <param name="name" value="$(arg name)" />
+    </node>
+
+    <node pkg="nodelet" type="nodelet" name="debayer" args="load image_proc/debayer nodelet_manager --no-bond" >
+        <remap from="image_raw" to="/$(arg name)/video/image_raw" />
         <remap from="image_mono" to="/$(arg name)/video/image_mono" />
-	<remap from="image_color" to="/$(arg name)/video/image_color" />
--  </node>
--  <node pkg="nodelet" type="nodelet" name="rectify_mono" args="load image_proc/rectify nodelet_manager --no-bond" >
--	<remap from="camera_info" to="/$(arg name)/video/camera_info" />
--       <remap from="image_mono" to="/$(arg name)/video/image_mono" />
--       <remap from="image_rect" to="/$(arg name)/video/image_rect" />
--  </node>
+        <remap from="image_color" to="/$(arg name)/video/image_color" />
+    </node>
 
-  <node pkg="rqt_image_view" type="rqt_image_view" name="image_view" output="screen" />
+    <node pkg="nodelet" type="nodelet" name="rectify_mono" args="load image_proc/rectify nodelet_manager --no-bond" >
+        <remap from="camera_info" to="/$(arg name)/video/camera_info" />
+        <remap from="image_mono" to="/$(arg name)/video/image_mono" />
+        <remap from="image_rect" to="/$(arg name)/video/image_rect" />
+    </node>
+
+    <node pkg="rqt_image_view" type="rqt_image_view" name="image_view" output="screen" />
+
 </launch>
 
 
