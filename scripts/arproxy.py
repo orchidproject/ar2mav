@@ -9,6 +9,7 @@ import threading
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '../mavlink/pymavlink'))
 import mavutil
+from mavutil import mavlink
 from tools import *
 
 # Constants
@@ -49,7 +50,7 @@ ADHOC_MANUAL = 99
 
 
 class ARProxyConnection:
-    def __init__(self, name, ip, in_port, destination, nav_data_port, timeout=10, verbose=0, repeat=1, qgc=False):
+    def __init__(self, name, ip, in_port, destination, nav_data_port, timeout=3, verbose=0, repeat=1, qgc=False):
         # General input variables required
         self.drone = (ip, PORTS["MAVLINK"])  # IP address and port for communication with the drone
         self.name = name  # Name of the drone, mainly for logging purposes
@@ -94,8 +95,15 @@ class ARProxyConnection:
         #**********************************************************************
         # Set up connection to handle mavlink communication
         #**********************************************************************
-        self.connection = mavutil.mavlink_connection(self.host[0] + ":" +
-                str(self.port))
+        while self.connection is None:
+            try:
+                self.connection = mavutil.mavlink_connection(self.host[0] +
+                        ":" + str(self.port))
+            except socket.error as e:
+                    print("[AR2MAV] error connecting to %s -- network down?" %
+                            self.name)
+                    print("[AR2MAV] %s -- error is: %s" % (self.name, str(e)) )
+                    time.sleep(1)
 
         #**********************************************************************
         # Setup Parrot API connection with blocking on
@@ -136,12 +144,19 @@ class ARProxyConnection:
             if time.time() - self.mav_last > self.timeout:
                 print("[AR2MAV]%s: Waiting for Heartbeat" % self.name)
                 drone_connected = False
-                self.connection.port.sendto(
-                    mavutil.mavlink.MAVLink_ping_message(time.time() * 1E6, 1, 0, 0).pack(self.connection.mav),
-                    self.drone)
+                try:
+                    msg = mavlink.MAVLink_ping_message(time.time()*1E6,1,0,0)
+                    self.connection.port.sendto(msg.pack(self.connection.mav),
+                        self.drone)
+                except socket.error as e:
+                    print("[AR2MAV] error contacting %s -- network down?" %
+                            self.name)
+                    print("[AR2MAV] %s -- error is: %s" % (self.name, str(e)) )
+
             elif not drone_connected and self.target_system is not None:
                 drone_connected = True
                 print("[AR2MAV]%s: now connected" % self.name)
+
             time.sleep(self.timeout)
 
     def handle_mavlink(self):
@@ -162,7 +177,15 @@ class ARProxyConnection:
             #******************************************************************
             #   Wait (forever) until we receive a mavlink message
             #******************************************************************
-            msg = self.connection.recv_match(blocking=True)
+            msg = None
+            try:
+                msg = self.connection.recv_match(blocking=True)
+            except socket.error as e:
+                print("[AR2MAV]%s: caught socket error while trying to"
+                        " receive mavlink message: %s" %
+                        (self.name, str(e)) )
+                traceback.print_exc()
+                time.sleep(1)
 
             #******************************************************************
             # If recv_match returns without a message, then try again
@@ -187,13 +210,25 @@ class ARProxyConnection:
             # Process data from drone
             #******************************************************************
             elif self.connection.last_address == self.drone:
-                self.process_from_drone(msg)
+                try:
+                    self.process_from_drone(msg)
+                except socket.error as e:
+                    print("[AR2MAV]%s: caught socket error while processing"
+                            " last message from drone: %s" %
+                            (self.name, str(e)) )
+                    traceback.print_exc()
 
             #******************************************************************
             # Process data from host
             #******************************************************************
             elif self.connection.last_address == self.host:
-                self.process_from_host(msg)
+                try:
+                    self.process_from_host(msg)
+                except socket.error as e:
+                    print("[AR2MAV]%s: caught socket error while processing"
+                            " last message from host: %s" %
+                            (self.name, str(e)) )
+                    traceback.print_exc()
 
             #******************************************************************
             # Process data from QGroundControl (we should be able to treat
@@ -201,7 +236,13 @@ class ARProxyConnection:
             #******************************************************************
             elif self.qgc and \
                  self.connection.last_address == (self.host[0], QGC_PORT):
-                self.process_from_host(msg)
+                try:
+                    self.process_from_host(msg)
+                except socket.error as e:
+                    print("[AR2MAV]%s: caught socket error while processing"
+                            " last message from QGroundControl: %s" %
+                            (self.name, str(e)) )
+                    traceback.print_exc()
 
             #******************************************************************
             # Ignore data from anyone else
