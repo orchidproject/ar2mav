@@ -582,6 +582,9 @@ if __name__ == "__main__":
         t = threading.Thread(name="Thread-" + key, target=proxies[-1].start)
         t.setDaemon(True)
         t.start()
-    time.sleep(30)
-    while proxies[0].alive:
+    try:
         time.sleep(30)
+        while proxies[0].alive:
+            time.sleep(30)
+    except KeyboardInterrupt:
+        print "AR2MAV Exiting normally"
