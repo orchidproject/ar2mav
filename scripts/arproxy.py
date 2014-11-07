@@ -322,7 +322,7 @@ class ARProxyConnection:
                 self.invoke_parrot_api(PARROT_API_ACK)
             # Else we create and send MAVLink messages
             elif time.time() - self.mav_last > self.mav_interval:
-                if self.verbose > 0:
+                if self.verbose > 1:
                     print("[AR2MAV]%s: Make MAVLink" % self.name)
                 # If we are landed and we don't need to acknowledge change to MANUAL mode
                 if data["DEMO"]["CONTROL_STATE"] < 3 < self.change_mode:
