@@ -27,6 +27,8 @@ PARROT_API_NAVDATA_REQUEST = 10
 PARROT_API_NAVDATA_COMMAND = 11
 PARROT_API_NAVDATA_OPTIONS = 12
 PARROT_API_NAVDATA_CORRECTION = 13
+PARROT_API_FLAT_TRIM = 14  # drone must be landed on level surface
+PARROT_API_CALIBRATE_MAGNETOMETER = 15  # drone must be flying
 
 SKIP_TYPES = ["SYS_STATUS", "ATTITUDE", "GPS_RAW_INT", "GLOBAL_POSITION_INT", "LOCAL_POSITION_NED", "RAW_IMU",
               "NAV_CONTROLLER_OUTPUT", "VFR_HUD"]
@@ -421,6 +423,10 @@ class ARProxyConnection:
                             (msg.chan1_raw, msg.chan2_raw, msg.chan3_raw, msg.chan4_raw))
 
     def invoke_parrot_api(self, command, extra=0):
+
+        #***********************************************************************
+        #   Construct AT command according to AR.Drone API specification
+        #***********************************************************************
         msg = None
         if command == PARROT_API_NAVDATA_REQUEST:
             self.parrot_api_conn.sendto("\x01\x00\x00\x00", (self.drone[0], PORTS["NAVDATA"]))
@@ -462,10 +468,43 @@ class ARProxyConnection:
             self.cmd_seq += self.repeat
             time.sleep(self.mav_interval)
             msg = "AT*REF={},%d\r" % COMMAND_LAND
+
+        #***********************************************************************
+        #   Set flat trim. (Drone must be landed on a flat level surface).
+        #   DO NOT ISSUE THIS COMMAND IF IN THE AIR - BAD THINGS MIGHT HAPPEN
+        #***********************************************************************
+        elif command = PARROT_API_FLAT_TRIM:
+            msg = "AT*FTRIM={}\r"
+
+        #***********************************************************************
+        #   Calibrate magnetometer (Drone must be in the air)
+        #***********************************************************************
+        elif command == PARROT_API_CALIBRATE_MAGNETOMETER: 
+            msg = "AT*CALIB={},0\r"
+
+        #***********************************************************************
+        #   Any other command is undefined and should be ignored.
+        #   This should never happen!
+        #***********************************************************************
+        else:
+            print("[AR2MAV] Internal error - " + \
+                  "ignoring unknown Parrot API Command")
+            return
+
+        #***********************************************************************
+        #   Send message a few times to make sure the drone gets the message
+        #   Note we replace '{}' with the command sequence number, which the
+        #   drone expects to ensure commands don't arrive out of order.
+        #***********************************************************************
         for i in range(self.repeat):
             self.parrot_api_conn.sendto(msg.format(self.cmd_seq + i), (self.drone[0], PORTS["AT"]))
             if self.verbose > 2:
                 print("[AR2MAV]" + str(self.name) + str(msg.format(self.cmd_seq + i)))
+
+        #***********************************************************************
+        #   Increment the sequence number for the next command (drone expects
+        #   these to be in order).
+        #***********************************************************************
         self.cmd_seq += self.repeat
 
     def construct_mavlink_messages(self, data):
