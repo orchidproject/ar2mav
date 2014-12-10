@@ -30,6 +30,14 @@ PARROT_API_NAVDATA_CORRECTION = 13
 PARROT_API_FLAT_TRIM = 14  # drone must be landed on level surface
 PARROT_API_CALIBRATE_MAGNETOMETER = 15  # drone must be flying
 
+#*******************************************************************************
+#  Mavlink system status codes. These have to be sent in heartbeat messages
+#  while in manual mode. In AUTO mode, the drone will set these for us.
+#*******************************************************************************
+MAV_STATE_STANDBY = 3  # drone is grounded, ready to fly
+MAV_STATE_ACTIVE = 4  # drone might be airbourne
+MAV_STATE_EMERGENCY = 6  # drone is in emergency mode
+
 SKIP_TYPES = ["SYS_STATUS", "ATTITUDE", "GPS_RAW_INT", "GLOBAL_POSITION_INT", "LOCAL_POSITION_NED", "RAW_IMU",
               "NAV_CONTROLLER_OUTPUT", "VFR_HUD"]
 
@@ -324,20 +332,42 @@ class ARProxyConnection:
                 self.invoke_parrot_api(PARROT_API_ACK)
             # Else we create and send MAVLink messages
             elif time.time() - self.mav_last > self.mav_interval:
+
                 if self.verbose > 1:
                     print("[AR2MAV]%s: Make MAVLink" % self.name)
+
+                #***************************************************************
                 # If we are landed and we don't need to acknowledge change to MANUAL mode
+                #***************************************************************
                 if data["DEMO"]["CONTROL_STATE"] < 3 < self.change_mode:
                     self.custom_mode = 9
+                #***************************************************************
                 # If we need to acknowledge change to MANUAL mode
+                #***************************************************************
                 elif self.manual:
                     self.custom_mode = 99
                     self.change_mode += 1
+                #***************************************************************
                 # Otherwise we are in AUTO mode
+                #***************************************************************
                 else:
                     self.custom_mode = 3
                     self.change_mode += 1
+
+                #***************************************************************
+                #   Set system state to indicate that we are either in
+                #   emergency mode, landed or in active flight
+                #***************************************************************
+                if data["ARDRONE_STATE"]["EMERGENCY_MASK"]:
+                    self.status = MAV_STATE_EMERGENCY
+                elif data["ARDRONE_STATE"]["FLY_MASK"]:
+                    self.status = MAV_STATE_ACTIVE
+                else:
+                    self.status = MAV_STATE_STANDBY
+
+                #***************************************************************
                 # Construct all MAVLink messages and send them
+                #***************************************************************
                 msgs = self.construct_mavlink_messages(data)
                 for key in msgs.keys():
                     self.connection.mav.srcSystem = int(self.ip.split(".")[3])
@@ -473,7 +503,7 @@ class ARProxyConnection:
         #   Set flat trim. (Drone must be landed on a flat level surface).
         #   DO NOT ISSUE THIS COMMAND IF IN THE AIR - BAD THINGS MIGHT HAPPEN
         #***********************************************************************
-        elif command = PARROT_API_FLAT_TRIM:
+        elif command == PARROT_API_FLAT_TRIM:
             msg = "AT*FTRIM={}\r"
 
         #***********************************************************************
