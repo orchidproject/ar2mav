@@ -42,9 +42,12 @@ SKIP_TYPES = ["SYS_STATUS", "ATTITUDE", "GPS_RAW_INT", "GLOBAL_POSITION_INT", "L
               "NAV_CONTROLLER_OUTPUT", "VFR_HUD"]
 
 QGC_PORT = 14555
-EMERGENCY_CODE = 100
+EMERGENCY_CODE = 100  # emergency mode recognised by Parrot
+FLAT_TRIM_CODE = 101  # perform flat trim - ONLY DO THIS WHILE LANDED
+CALIBRATE_MAGNETOMETER_CODE = 102  # calibrate magnetometer ONLY DO THIS IN THE AIR
 KILL_CODE = 255
 ADHOC_MANUAL = 99
+
 # Messages
 # HEARTBEAT - sanitised X
 # ATTITUDE - sanitised X
@@ -418,7 +421,13 @@ class ARProxyConnection:
         # Turn on/off emergency mode
         elif msg.get_type() == "COMMAND_LONG" and msg.command == EMERGENCY_CODE:
             self.invoke_parrot_api(PARROT_API_EMERGENCY)
-        # If we are in manual
+        # Perform flat trim 
+        elif msg.get_type() == "COMMAND_LONG" and msg.command == FLAT_TRIM_CODE:
+            self.invoke_parrot_api(PARROT_API_FLAT_TRIM)
+        # Perform magnetometer calibration
+        elif msg.get_type() == "COMMAND_LONG" and msg.command == CALIBRATE_MAGNETOMETER_CODE:
+            self.invoke_parrot_api(PARROT_API_CALIBRATE_MAGNETOMETER)
+        # if we are in manual, deal with manual instructions
         elif self.manual:
             self.send_manual_command(msg)
         # Otherwise reroute the message to the drone
@@ -504,12 +513,14 @@ class ARProxyConnection:
         #   DO NOT ISSUE THIS COMMAND IF IN THE AIR - BAD THINGS MIGHT HAPPEN
         #***********************************************************************
         elif command == PARROT_API_FLAT_TRIM:
+            print("[AR2MAV] Performing flat trim")
             msg = "AT*FTRIM={}\r"
 
         #***********************************************************************
         #   Calibrate magnetometer (Drone must be in the air)
         #***********************************************************************
         elif command == PARROT_API_CALIBRATE_MAGNETOMETER: 
+            print("[AR2MAV] Calibrating Magnetometer")
             msg = "AT*CALIB={},0\r"
 
         #***********************************************************************
