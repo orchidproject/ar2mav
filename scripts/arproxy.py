@@ -482,19 +482,19 @@ class ARProxyConnection:
         elif command == PARROT_API_RC:
             if len(extra) == 6:
                 rc = struct.unpack('iiiiii', struct.pack('ffffff',
-                                                         (extra[0] - 1500) / 500,
-                                                         (extra[1] - 1500) / 500,
-                                                         (extra[2] - 1500) / 500,
-                                                         (extra[3] - 1500) / 500,
-                                                         (extra[4] - 1500) / 500,
-                                                         (extra[5] - 1500) / 500))
+                                                         (extra[0] - 1500.0) / 500.0,
+                                                         (extra[1] - 1500.0) / 500.0,
+                                                         (extra[2] - 1500.0) / 500.0,
+                                                         (extra[3] - 1500.0) / 500.0,
+                                                         (extra[4] - 1500.0) / 500.0,
+                                                         (extra[5] - 1500.0) / 500.0))
                 msg = "AT*PCMD_MAG={},1," + ",".join([str(i) for i in rc]) + "\r"
             elif len(extra) == 4:
                 rc = struct.unpack('iiii', struct.pack('ffff',
-                                                       (extra[0] - 1500) / 500,
-                                                       (extra[1] - 1500) / 500,
-                                                       (extra[2] - 1500) / 500,
-                                                       (extra[3] - 1500) / 500))
+                                                       (extra[0] - 1500.0) / 500.0,
+                                                       (extra[1] - 1500.0) / 500.0,
+                                                       (extra[2] - 1500.0) / 500.0,
+                                                       (extra[3] - 1500.0) / 500.0))
                 msg = "AT*PCMD={},1," + ",".join([str(i) for i in rc]) + "\r"
         elif command == PARROT_API_ACK:
             msg = "AT*CTRL={},0,0\r"
