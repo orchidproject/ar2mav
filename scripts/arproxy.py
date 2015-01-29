@@ -46,7 +46,8 @@ EMERGENCY_CODE = 100  # emergency mode recognised by Parrot
 FLAT_TRIM_CODE = 101  # perform flat trim - ONLY DO THIS WHILE LANDED
 CALIBRATE_MAGNETOMETER_CODE = 102  # calibrate magnetometer ONLY DO THIS IN THE AIR
 KILL_CODE = 255
-ADHOC_MANUAL = 99
+ADHOC_MANUAL_CUSTOM_MODE = 99
+ADHOC_MANUAL_BASE_MODE = 65
 
 # Messages
 # HEARTBEAT - sanitised X
@@ -90,7 +91,6 @@ class ARProxyConnection:
         self.mav_last = -2.0*timeout   # Last time a MAVLink message was sent to host
         self.mav_interval = 0.25    # Interval on which to send MAVLink messages when using the PARROT API
         self.parrot_api_call = 0   # The first recent time when we invoked the PARROT API
-        self.change_mode = 0    # Counter for how many times we changed the MODE, used for MANUAL/AUTO indication
 
         # MAVLink meta data variables used for creating or alternating MAVLink messages
         self.base_mode = None
@@ -340,22 +340,16 @@ class ARProxyConnection:
                     print("[AR2MAV]%s: Make MAVLink" % self.name)
 
                 #***************************************************************
-                # If we are landed and we don't need to acknowledge change to MANUAL mode
-                #***************************************************************
-                if data["DEMO"]["CONTROL_STATE"] < 3 < self.change_mode:
-                    self.custom_mode = 9
-                #***************************************************************
                 # If we need to acknowledge change to MANUAL mode
                 #***************************************************************
-                elif self.manual:
+                if self.manual:
                     self.custom_mode = 99
-                    self.change_mode += 1
+
                 #***************************************************************
                 # Otherwise we are in AUTO mode
                 #***************************************************************
                 else:
                     self.custom_mode = 3
-                    self.change_mode += 1
 
                 #***************************************************************
                 #   Set system state to indicate that we are either in
@@ -402,10 +396,10 @@ class ARProxyConnection:
         elif msg.get_type() == "SET_MODE":
             if msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED > 0:
                 # Switch to MANUAL mode
-                if msg.custom_mode == ADHOC_MANUAL:
+                if msg.custom_mode == ADHOC_MANUAL_CUSTOM_MODE:
                     self.manual = 1
-                    self.custom_mode = ADHOC_MANUAL
-                    self.change_mode = 0
+                    self.base_mode = ADHOC_MANUAL_BASE_MODE
+                    self.custom_mode = ADHOC_MANUAL_CUSTOM_MODE
                     self.invoke_parrot_api(PARROT_API_NAVDATA_REQUEST)
                     self.invoke_parrot_api(PARROT_API_NAVDATA_OPTIONS)
                     if self.verbose > 0:
@@ -414,7 +408,6 @@ class ARProxyConnection:
                 elif msg.custom_mode == 3:
                     self.manual = 0
                     self.custom_mode = 3
-                    self.change_mode = 0
                     self.connection.port.sendto(msg._msgbuf, self.drone)
                     if self.verbose > 0:
                         print("[AR2MAV]%s: MANUAL MODE OFF" % self.name)
@@ -557,9 +550,9 @@ class ARProxyConnection:
             self.custom_mode, self.status, 3)
         messages["MISSION_CURRENT"] = mavutil.mavlink.MAVLink_mission_current_message(self.mission_seq)
         messages["ATTITUDE"] = mavutil.mavlink.MAVLink_attitude_message(data["TIME"],
-                                                                        data["DEMO"]["PHI"] * pi / 180000,
-                                                                        data["DEMO"]["THETA"] * pi / 180000,
-                                                                        data["DEMO"]["PSI"] * pi / 180000,
+                                                                        data["DEMO"]["PHI"] * pi / 180000.0,
+                                                                        data["DEMO"]["THETA"] * pi / 180000.0,
+                                                                        data["DEMO"]["PSI"] * pi / 180000.0,
                                                                         # TODO No Idea which is ROLL, PITCH and YAW angular speed ?
                                                                         0, 0, 0)
         messages["SYS_STATUS"] = mavutil.mavlink.MAVLink_sys_status_message(
@@ -573,9 +566,9 @@ class ARProxyConnection:
             struct.unpack("i", struct.pack("i", round(data["GPS"]["ELEVATION"] * 1E3)))[0],
             struct.unpack("i", struct.pack("i", round(data["DEMO"]["ALTITUDE"])))[0],
             # TODO Not sure Vx, vY amd Vz are in GPS frame and also which is the heading ?
-            struct.unpack("h", struct.pack("h", round(data["DEMO"]["VX"] / 10)))[0],
-            struct.unpack("h", struct.pack("h", round(data["DEMO"]["VY"] / 10)))[0],
-            struct.unpack("h", struct.pack("h", round(data["DEMO"]["VZ"] / 10)))[0],
+            struct.unpack("h", struct.pack("h", round(data["DEMO"]["VX"] / 10.0)))[0],
+            struct.unpack("h", struct.pack("h", round(data["DEMO"]["VY"] / 10.0)))[0],
+            struct.unpack("h", struct.pack("h", round(data["DEMO"]["VZ"] / 10.0)))[0],
             0)
         self.relative_alt = round(data["DEMO"]["ALTITUDE"]) / 1E3
         messages["GPS_RAW_INT"] = mavutil.mavlink.MAVLink_gps_raw_int_message(
