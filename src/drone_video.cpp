@@ -106,11 +106,13 @@ int establish_socket(const std::string* name, sockaddr_in* myAddr, sockaddr_in* 
     const int one = 1;
     int socketNumber = socket(AF_INET, SOCK_STREAM, 0);
     while(ros::ok() && connect(socketNumber, (sockaddr*) droneAddr, sizeof(sockaddr_in)) != 0) {
-        ROS_INFO("[%s]Did not manage to establish connection", (*name).c_str());
+        ROS_INFO("[%s]Did not manage to establish video connection", (*name).c_str());
         ros::Duration((*timeout).tv_sec + (*timeout).tv_usec / 1000000.0).sleep();
+        socketNumber = socket(AF_INET, SOCK_STREAM, 0);
     }
     setsockopt(socketNumber, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
     setsockopt(socketNumber, SOL_SOCKET, SO_RCVTIMEO, (char *)timeout,sizeof(struct timeval));
+    ROS_INFO("[%s] Video connection established.", (*name).c_str());
     return socketNumber;
 }
 
